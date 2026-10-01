@@ -4,7 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Zoom Video Live Classroom</title>
+  <!-- Zoom Video SDK Official UI Toolkit -->
   <link rel="stylesheet" href="https://source.zoom.us/uitoolkit/2.5.0-1/videosdk-ui-toolkit.css" />
+  <script src="https://source.zoom.us/uitoolkit/2.5.0-1/videosdk-ui-toolkit.min.umd.js"></script>
+
   <style>
     * {
       box-sizing: border-box;
@@ -30,13 +33,13 @@
 
     /* Top HUD / Connection Status Bar */
     .hud-bar {
-      height: 42px;
+      height: 40px;
       background: rgba(15, 23, 42, 0.95);
       border-bottom: 1px solid rgba(51, 65, 85, 0.7);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 16px;
+      padding: 0 14px;
       font-size: 12px;
       z-index: 100;
       backdrop-filter: blur(8px);
@@ -77,7 +80,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 280px;
+      max-width: 320px;
     }
     .room-info b {
       color: #e2e8f0;
@@ -90,8 +93,8 @@
     .status-badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 3px 10px;
+      gap: 5px;
+      padding: 3px 9px;
       border-radius: 6px;
       font-size: 11px;
       font-weight: 600;
@@ -104,54 +107,143 @@
       border-color: rgba(16, 185, 129, 0.4);
       color: #34d399;
     }
-    .status-badge.fallback {
-      background: rgba(99, 102, 241, 0.2);
-      border-color: rgba(99, 102, 241, 0.4);
-      color: #a5b4fc;
-    }
 
-    /* Zoom SDK Container */
-    #sessionContainer {
+    /* Video Workspace Container */
+    #mediaWorkspace {
       flex: 1;
       width: 100%;
-      height: calc(100% - 42px);
+      height: calc(100% - 40px);
       position: relative;
-      background: #000;
-      display: none; /* Shown when Zoom SDK is active */
-    }
-
-    /* Fallback / Real Live Video Stage */
-    #liveStudioContainer {
-      flex: 1;
-      width: 100%;
-      height: calc(100% - 42px);
-      position: relative;
-      background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%);
+      background: radial-gradient(circle at center, #111827 0%, #030712 100%);
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      overflow: hidden;
     }
-    .video-grid {
+
+    /* Video Grid Layout */
+    .video-viewport {
       flex: 1;
       width: 100%;
       position: relative;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
       background: #020617;
+      overflow: hidden;
     }
-    .main-video-feed {
+
+    /* Main Video Stage (Remote Peer / Teacher / Screen Share) */
+    .stage-stream-box {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #050814;
+    }
+    .stage-video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .stage-video.mirror {
+      transform: scaleX(-1);
+    }
+
+    /* Floating Student / Self Video Tile (PiP) */
+    .pip-tile {
+      position: absolute;
+      bottom: 68px;
+      right: 14px;
+      width: 130px;
+      height: 90px;
+      border-radius: 10px;
+      background: #0f172a;
+      border: 2px solid #334155;
+      overflow: hidden;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7);
+      z-index: 40;
+      transition: all 0.2s ease;
+    }
+    .pip-tile.active-pip {
+      border-color: #10b981;
+    }
+    .pip-video {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1); /* Mirror for natural selfie webcam experience */
-      border-radius: 0;
+      transform: scaleX(-1);
     }
-    .video-overlay-details {
+    .pip-label {
       position: absolute;
-      top: 14px;
+      bottom: 4px;
+      left: 6px;
+      background: rgba(0, 0, 0, 0.65);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .pip-mic-icon {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: rgba(0, 0, 0, 0.65);
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Remote Peer Gallery Row */
+    .remote-gallery {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 35;
+      max-height: 80%;
+      overflow-y: auto;
+    }
+    .remote-peer-card {
+      width: 120px;
+      height: 80px;
+      border-radius: 8px;
+      background: #0f172a;
+      border: 1.5px solid #3b82f6;
+      overflow: hidden;
+      position: relative;
+    }
+    .remote-peer-card video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .remote-peer-name {
+      position: absolute;
+      bottom: 2px;
+      left: 4px;
+      font-size: 9px;
+      background: rgba(0,0,0,0.7);
+      padding: 1px 4px;
+      border-radius: 3px;
+      color: #fff;
+      max-width: 90%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Stage Overlays */
+    .stage-info-pill {
+      position: absolute;
+      top: 12px;
       left: 14px;
       background: rgba(15, 23, 42, 0.85);
       backdrop-filter: blur(8px);
@@ -161,8 +253,9 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      z-index: 30;
     }
-    .user-avatar {
+    .user-avatar-circle {
       width: 24px;
       height: 24px;
       border-radius: 50%;
@@ -174,39 +267,66 @@
       font-size: 11px;
       font-weight: 700;
     }
-    .user-name-tag {
+    .user-name-title {
       font-size: 12px;
       font-weight: 600;
       color: #f8fafc;
     }
+    .user-role-badge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #0369a1;
+      color: #e0f2fe;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
 
-    /* Real-Time Audio Visualizer Bar */
-    .audio-visualizer-box {
+    /* Audio Visualizer Level Meter */
+    .audio-meter-box {
       position: absolute;
-      bottom: 74px;
+      bottom: 68px;
       left: 14px;
       background: rgba(15, 23, 42, 0.85);
       backdrop-filter: blur(6px);
-      padding: 6px 12px;
+      padding: 5px 10px;
       border-radius: 8px;
       border: 1px solid rgba(51, 65, 85, 0.8);
       display: flex;
       align-items: center;
       gap: 8px;
+      z-index: 30;
     }
-    .audio-canvas {
-      width: 60px;
-      height: 16px;
+    .audio-bars-canvas {
+      width: 50px;
+      height: 14px;
     }
-    .mic-level-label {
+    .audio-meter-text {
       font-size: 10px;
       color: #94a3b8;
-      text-transform: uppercase;
-      font-weight: 700;
+      font-weight: 600;
     }
 
-    /* Video Off State */
-    .video-placeholder {
+    /* Screen Sharing Notice Banner */
+    .screenshare-banner {
+      position: absolute;
+      top: 52px;
+      left: 14px;
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(139, 92, 246, 0.5);
+      color: #c4b5fd;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      z-index: 30;
+    }
+
+    /* Stage Placeholder when camera is off */
+    .stage-placeholder {
       position: absolute;
       top: 0;
       left: 0;
@@ -216,56 +336,56 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #0b1120;
-      gap: 14px;
-      z-index: 5;
+      background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%);
+      gap: 12px;
+      z-index: 10;
     }
-    .placeholder-avatar {
-      width: 80px;
-      height: 80px;
+    .placeholder-badge-icon {
+      width: 72px;
+      height: 72px;
       border-radius: 50%;
       background: #1e293b;
       border: 2px solid #334155;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 700;
       color: #38bdf8;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
     }
-    .placeholder-title {
+    .placeholder-main-text {
       font-size: 15px;
       font-weight: 600;
       color: #e2e8f0;
     }
-    .placeholder-subtitle {
+    .placeholder-sub-text {
       font-size: 12px;
       color: #64748b;
     }
 
-    /* Live Studio Control Bar */
-    .studio-controls {
-      height: 64px;
+    /* Interactive Floating Action Bar */
+    .stage-control-bar {
+      height: 56px;
       width: 100%;
       background: rgba(15, 23, 42, 0.95);
       border-top: 1px solid rgba(51, 65, 85, 0.8);
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 14px;
+      gap: 12px;
       padding: 0 16px;
       z-index: 50;
     }
-    .btn-control {
+    .btn-action {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      height: 42px;
-      padding: 0 16px;
+      gap: 7px;
+      height: 38px;
+      padding: 0 14px;
       border-radius: 9999px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       cursor: pointer;
       border: 1px solid rgba(51, 65, 85, 0.8);
@@ -274,43 +394,34 @@
       transition: all 0.15s ease;
       user-select: none;
     }
-    .btn-control:hover {
+    .btn-action:hover {
       background: #334155;
       border-color: #475569;
     }
-    .btn-control:active {
-      transform: scale(0.97);
-    }
-    .btn-control.active-green {
+    .btn-action.active-green {
       background: #059669;
       border-color: #10b981;
       color: #ffffff;
     }
-    .btn-control.active-green:hover {
-      background: #047857;
-    }
-    .btn-control.danger {
-      background: #dc2626;
-      border-color: #ef4444;
+    .btn-action.active-purple {
+      background: #7c3aed;
+      border-color: #8b5cf6;
       color: #ffffff;
     }
-    .btn-control.danger:hover {
-      background: #b91c1c;
-    }
-    .btn-control svg {
-      width: 18px;
-      height: 18px;
+    .btn-action svg {
+      width: 16px;
+      height: 16px;
       fill: currentColor;
     }
 
-    /* Notice Toast */
-    .toast-notice {
+    /* Toast Alert */
+    .toast-popup {
       position: absolute;
-      top: 52px;
+      top: 48px;
       right: 14px;
       background: rgba(15, 23, 42, 0.95);
       border: 1px solid rgba(56, 189, 248, 0.4);
-      padding: 10px 14px;
+      padding: 8px 12px;
       border-radius: 8px;
       font-size: 12px;
       color: #e2e8f0;
@@ -318,7 +429,7 @@
       z-index: 200;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
       display: none;
-      animation: fadeIn 0.25s ease;
+      animation: fadeIn 0.2s ease;
     }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(-6px); }
@@ -328,7 +439,7 @@
 </head>
 <body>
   <div id="root-container">
-    <!-- Top HUD -->
+    <!-- Top HUD Bar -->
     <div class="hud-bar">
       <div class="hud-left">
         <span class="live-indicator">
@@ -338,180 +449,180 @@
         <span class="room-info" id="roomDisplay">Connecting to room...</span>
       </div>
       <div class="hud-right">
-        <span class="status-badge" id="statusBadge">Zoom Video SDK</span>
+        <span class="status-badge" id="engineStatusBadge">Zoom Video Engine</span>
+        <span class="status-badge connected" id="peerCountBadge">1 connected</span>
       </div>
     </div>
 
     <!-- Toast Notification -->
-    <div class="toast-notice" id="toastNotice"></div>
+    <div class="toast-popup" id="toastPopup"></div>
 
-    <!-- 1. Zoom Video SDK Official Container -->
-    <div id="sessionContainer"></div>
+    <!-- Media Workspace -->
+    <div id="mediaWorkspace">
+      <div class="video-viewport">
+        <!-- Main Stage Stream Box -->
+        <div class="stage-stream-box" id="stageStreamBox">
+          <video id="stageVideo" class="stage-video" autoplay playsinline></video>
 
-    <!-- 2. Real Hardware Media Stream Studio (Active Live Fallback & Direct Camera/Mic Stream) -->
-    <div id="liveStudioContainer">
-      <div class="video-grid">
-        <!-- Live Webcam Video Track -->
-        <video id="webcamVideo" class="main-video-feed" autoplay playsinline muted></video>
-
-        <!-- Placeholder when camera is switched off -->
-        <div class="video-placeholder" id="videoPlaceholder">
-          <div class="placeholder-avatar" id="avatarInitial">U</div>
-          <div class="placeholder-title" id="placeholderUser">User</div>
-          <div class="placeholder-subtitle">Camera is currently muted • Click "Start Video" below</div>
+          <!-- Stage Placeholder when no video active -->
+          <div class="stage-placeholder" id="stagePlaceholder">
+            <div class="placeholder-badge-icon" id="stageInitial">H</div>
+            <div class="placeholder-main-text" id="stageMainTitle">Classroom Broadcast</div>
+            <div class="placeholder-sub-text" id="stageSubTitle">Connecting audio and video streams…</div>
+          </div>
         </div>
 
-        <!-- Overlays -->
-        <div class="video-overlay-details">
-          <div class="user-avatar" id="tagAvatar">U</div>
-          <span class="user-name-tag" id="tagUserName">Attendee</span>
+        <!-- Floating Self PiP Tile (Student or Host Webcam) -->
+        <div class="pip-tile" id="pipTile">
+          <video id="pipVideo" class="pip-video" autoplay playsinline muted></video>
+          <span class="pip-label" id="pipNameLabel">You</span>
+          <div class="pip-mic-icon">
+            <svg id="pipMicSvg" viewBox="0 0 24 24" width="10" height="10" fill="#94a3b8"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/></svg>
+          </div>
         </div>
 
-        <div class="audio-visualizer-box" id="audioVisualizerBox">
-          <canvas class="audio-canvas" id="audioCanvas" width="60" height="16"></canvas>
-          <span class="mic-level-label" id="micStatusLabel">Mic Off</span>
+        <!-- Remote Participants Gallery -->
+        <div class="remote-gallery" id="remoteGallery"></div>
+
+        <!-- Stage Overlays -->
+        <div class="stage-info-pill">
+          <div class="user-avatar-circle" id="overlayAvatar">U</div>
+          <span class="user-name-title" id="overlayName">Instructor</span>
+          <span class="user-role-badge" id="overlayRole">Faculty</span>
+        </div>
+
+        <!-- Screen Share Active Banner -->
+        <div class="screenshare-banner" id="screenshareBanner">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.11-.9-2-2-2H4c-1.11 0-2 .89-2 2v10c0 1.1.89 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
+          <span id="screenshareLabel">Screen share active</span>
+        </div>
+
+        <!-- Live Audio Waveform Meter -->
+        <div class="audio-meter-box">
+          <canvas class="audio-bars-canvas" id="audioCanvas" width="50" height="14"></canvas>
+          <span class="audio-meter-text" id="audioMeterText">Mic Muted</span>
         </div>
       </div>
 
-      <!-- Studio Control Bar -->
-      <div class="studio-controls">
-        <!-- Mic Toggle Button -->
-        <button class="btn-control" id="btnMic" onclick="toggleAudio()">
-          <svg viewBox="0 0 24 24" id="micIcon"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+      <!-- Control Bar -->
+      <div class="stage-control-bar">
+        <!-- Mic / Audio -->
+        <button class="btn-action" id="btnMic" onclick="toggleMicrophone()">
+          <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
           <span id="btnMicText">Talk (Unmute)</span>
         </button>
 
-        <!-- Camera Toggle Button -->
-        <button class="btn-control" id="btnCamera" onclick="toggleVideo()">
-          <svg viewBox="0 0 24 24" id="camIcon"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+        <!-- Camera / Video -->
+        <button class="btn-action" id="btnCamera" onclick="toggleCamera()">
+          <svg viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
           <span id="btnCameraText">Open Camera</span>
         </button>
 
-        <!-- Screen Share Button -->
-        <button class="btn-control" id="btnShare" onclick="toggleShare()">
+        <!-- Share Screen -->
+        <button class="btn-action" id="btnShare" onclick="toggleScreenShare()">
           <svg viewBox="0 0 24 24"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.11-.9-2-2-2H4c-1.11 0-2 .89-2 2v10c0 1.1.89 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
           <span id="btnShareText">Share Screen</span>
         </button>
 
-        <!-- Switch Engine / Reconnect -->
-        <button class="btn-control" id="btnMode" onclick="toggleEngineMode()">
-          <span id="btnModeText">Retry Zoom Cloud</span>
+        <!-- Sound Device Output Test -->
+        <button class="btn-action" id="btnSound" onclick="toggleSoundOutput()">
+          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          <span id="btnSoundText">Audio On</span>
         </button>
       </div>
     </div>
   </div>
 
+  <!-- Hidden Audio Elements for Remote Peer Sound Playback -->
+  <div id="audioPool" style="display:none;"></div>
+
   <script>
     // -------------------------------------------------------------
-    // Query Parameters & Session Config
+    // Configuration & Session Parameters
     // -------------------------------------------------------------
     const urlParams = new URLSearchParams(window.location.search);
     const sessionToken = urlParams.get('token') || '';
     const sessionName = urlParams.get('room') || urlParams.get('sessionName') || 'live_class';
-    const userName = urlParams.get('name') || urlParams.get('userName') || 'Class Student';
+    const userName = urlParams.get('name') || urlParams.get('userName') || 'Class Member';
+    const sessionId = urlParams.get('sessionId') || '1';
+    const currentUserId = urlParams.get('userId') || Math.floor(Math.random() * 10000 + 100);
     const isHost = urlParams.get('role') === '1' || urlParams.get('isHost') === 'true';
-    const canTalk = urlParams.get('canTalk') !== 'false';
-    const canShareVideo = urlParams.get('canShareVideo') !== 'false';
 
-    // State
-    let zoomSdkActive = false;
+    // State Variables
     let localStream = null;
     let screenStream = null;
-    let isAudioActive = false;
-    let isVideoActive = false;
+    let isMicActive = false;
+    let isCameraActive = false;
+    let isScreenSharing = false;
     let audioContext = null;
-    let analyser = null;
-    let animFrameId = null;
+    let analyserNode = null;
+    let ws = null;
 
-    // Elements
+    // WebRTC Peer Connections: Map of targetUserId -> RTCPeerConnection
+    const peerConnections = new Map();
+    // Remote Streams: Map of targetUserId -> MediaStream
+    const remoteStreams = new Map();
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+      ],
+    };
+
+    // DOM Elements
     const roomDisplay = document.getElementById('roomDisplay');
-    const statusBadge = document.getElementById('statusBadge');
-    const sessionContainer = document.getElementById('sessionContainer');
-    const liveStudioContainer = document.getElementById('liveStudioContainer');
-    const webcamVideo = document.getElementById('webcamVideo');
-    const videoPlaceholder = document.getElementById('videoPlaceholder');
+    const engineStatusBadge = document.getElementById('engineStatusBadge');
+    const peerCountBadge = document.getElementById('peerCountBadge');
+    const stageVideo = document.getElementById('stageVideo');
+    const stagePlaceholder = document.getElementById('stagePlaceholder');
+    const stageInitial = document.getElementById('stageInitial');
+    const stageMainTitle = document.getElementById('stageMainTitle');
+    const stageSubTitle = document.getElementById('stageSubTitle');
+    const pipVideo = document.getElementById('pipVideo');
+    const pipTile = document.getElementById('pipTile');
+    const pipNameLabel = document.getElementById('pipNameLabel');
+    const pipMicSvg = document.getElementById('pipMicSvg');
+    const remoteGallery = document.getElementById('remoteGallery');
+    const overlayAvatar = document.getElementById('overlayAvatar');
+    const overlayName = document.getElementById('overlayName');
+    const overlayRole = document.getElementById('overlayRole');
+    const screenshareBanner = document.getElementById('screenshareBanner');
+    const screenshareLabel = document.getElementById('screenshareLabel');
+    const audioMeterText = document.getElementById('audioMeterText');
+    const audioCanvas = document.getElementById('audioCanvas');
+    const toastPopup = document.getElementById('toastPopup');
+    const audioPool = document.getElementById('audioPool');
+
     const btnMic = document.getElementById('btnMic');
     const btnMicText = document.getElementById('btnMicText');
     const btnCamera = document.getElementById('btnCamera');
     const btnCameraText = document.getElementById('btnCameraText');
     const btnShare = document.getElementById('btnShare');
     const btnShareText = document.getElementById('btnShareText');
-    const micStatusLabel = document.getElementById('micStatusLabel');
-    const toastNotice = document.getElementById('toastNotice');
 
-    // Display Identity
-    roomDisplay.innerHTML = `Room: <b>${sessionName}</b> • ${userName} (${isHost ? 'Host' : 'Student'})`;
-    document.getElementById('tagUserName').textContent = `${userName} ${isHost ? '(Host)' : ''}`;
-    const initial = (userName[0] || 'U').toUpperCase();
-    document.getElementById('avatarInitial').textContent = initial;
-    document.getElementById('tagAvatar').textContent = initial;
-    document.getElementById('placeholderUser').textContent = userName;
+    // UI Setup
+    roomDisplay.innerHTML = `Room: <b>${sessionName}</b> • ${userName}`;
+    pipNameLabel.textContent = `${userName} (You)`;
+    const initChar = (userName[0] || 'U').toUpperCase();
+    stageInitial.textContent = initChar;
+    overlayAvatar.textContent = initChar;
+    overlayName.textContent = userName;
+    overlayRole.textContent = isHost ? 'Host Faculty' : 'Student';
 
-    function showToast(msg, durationMs = 4500) {
-      toastNotice.textContent = msg;
-      toastNotice.style.display = 'block';
+    function showToast(msg, duration = 4000) {
+      toastPopup.textContent = msg;
+      toastPopup.style.display = 'block';
       setTimeout(() => {
-        toastNotice.style.display = 'none';
-      }, durationMs);
+        toastPopup.style.display = 'none';
+      }, duration);
     }
 
     // -------------------------------------------------------------
-    // 1. Attempt Zoom Video SDK UI Toolkit Connection
+    // 1. Initialize Local Media (Camera & Microphone)
     // -------------------------------------------------------------
-    async function initZoomSdk() {
-      const uitoolkit = window.UIToolkit?.default || window.UIToolkit;
-      if (!uitoolkit || !sessionToken) {
-        console.warn('[Zoom Video SDK] UIToolkit not present or token missing, launching Live Studio engine');
-        launchLiveStudio();
-        return;
-      }
-
-      try {
-        statusBadge.textContent = 'Zoom Cloud Connecting…';
-        statusBadge.className = 'status-badge';
-        
-        sessionContainer.style.display = 'block';
-        liveStudioContainer.style.display = 'none';
-
-        const config = {
-          videoSDKJWT: sessionToken,
-          sessionName: sessionName,
-          userName: userName,
-          sessionPasscode: '',
-          features: ['video', 'audio', 'settings', 'users', 'chat', 'share']
-        };
-
-        console.log('[Zoom Video SDK] Joining session:', sessionName, 'as', userName);
-        await uitoolkit.joinSession(sessionContainer, config);
-
-        zoomSdkActive = true;
-        statusBadge.textContent = isHost ? 'Zoom Cloud (Host)' : 'Zoom Cloud Connected';
-        statusBadge.classList.add('connected');
-        showToast('Connected to Zoom Video SDK Cloud.');
-        
-        notifyParent({ type: 'ZOOM_CONNECTED', sessionName, isHost });
-      } catch (err) {
-        console.warn('[Zoom Video SDK] Cloud join notice:', err);
-        showToast('Using Direct WebRTC Live Media Studio (Camera & Mic Active)');
-        launchLiveStudio();
-      }
-    }
-
-    // -------------------------------------------------------------
-    // 2. Fallback / Direct WebRTC Live Media Studio
-    // -------------------------------------------------------------
-    async function launchLiveStudio() {
-      zoomSdkActive = false;
-      sessionContainer.style.display = 'none';
-      liveStudioContainer.style.display = 'flex';
-      statusBadge.textContent = isHost ? 'Live Studio (Host)' : 'Live Studio (Student)';
-      statusBadge.className = 'status-badge fallback';
-
-      // Auto-start camera preview so the student/teacher sees their real video feed immediately
-      await startCameraStream();
-    }
-
-    async function startCameraStream() {
+    async function initLocalMedia() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
@@ -519,170 +630,461 @@
         });
 
         localStream = stream;
-        webcamVideo.srcObject = stream;
-        
-        // Mute mic initially by default, leave video on
-        const audioTrack = stream.getAudioTracks()[0];
-        if (audioTrack) audioTrack.enabled = false;
-        
-        const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack) {
-          videoTrack.enabled = true;
-          isVideoActive = true;
-          videoPlaceholder.style.display = 'none';
+        pipVideo.srcObject = stream;
+
+        // Auto-enable camera if host or student
+        const vTrack = stream.getVideoTracks()[0];
+        if (vTrack) {
+          vTrack.enabled = true;
+          isCameraActive = true;
           btnCamera.classList.add('active-green');
           btnCameraText.textContent = 'Stop Video';
+          pipTile.classList.add('active-pip');
         }
 
-        setupAudioMeter(stream);
-        notifyParent({ type: 'MEDIA_READY', isVideoActive, isAudioActive: false });
+        // Mute mic initially to avoid audio feedback
+        const aTrack = stream.getAudioTracks()[0];
+        if (aTrack) {
+          aTrack.enabled = false;
+          isMicActive = false;
+          btnMic.classList.remove('active-green');
+          btnMicText.textContent = 'Talk (Unmute)';
+          audioMeterText.textContent = 'Mic Muted';
+        }
+
+        // If Host, also render local video in the main stage initially
+        if (isHost) {
+          stageVideo.srcObject = stream;
+          stageVideo.classList.add('mirror');
+          stagePlaceholder.style.display = 'none';
+        }
+
+        setupAudioVisualizer(stream);
+        notifyParent({ type: 'MEDIA_READY', isCameraActive, isMicActive });
       } catch (err) {
-        console.warn('Camera/mic access:', err.name, err.message);
-        videoPlaceholder.style.display = 'flex';
-        showToast('Camera permission needed: allow browser access to show video feed.');
+        console.warn('Local camera/microphone error:', err);
+        showToast('Please grant camera & microphone access to participate in class.');
+        stageSubTitle.textContent = 'Camera permission needed in browser settings.';
       }
     }
 
-    // Real-Time Audio Visualizer for Microphone
-    function setupAudioMeter(stream) {
+    // -------------------------------------------------------------
+    // 2. Audio Waveform Visualizer
+    // -------------------------------------------------------------
+    function setupAudioVisualizer(stream) {
       try {
         window.AudioContext = window.AudioContext || window.webkitAudioContext;
         audioContext = new AudioContext();
         const source = audioContext.createMediaStreamSource(stream);
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 32;
-        source.connect(analyser);
+        analyserNode = audioContext.createAnalyser();
+        analyserNode.fftSize = 32;
+        source.connect(analyserNode);
 
-        const canvas = document.getElementById('audioCanvas');
-        const ctx = canvas.getContext('2d');
-        const bufferLength = analyser.frequencyBinCount;
+        const ctx = audioCanvas.getContext('2d');
+        const bufferLength = analyserNode.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
 
-        function drawMeter() {
-          animFrameId = requestAnimationFrame(drawMeter);
-          if (!isAudioActive) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        function drawWave() {
+          requestAnimationFrame(drawWave);
+          if (!isMicActive) {
+            ctx.clearRect(0, 0, audioCanvas.width, audioCanvas.height);
             return;
           }
-          analyser.getByteFrequencyData(dataArray);
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          analyserNode.getByteFrequencyData(dataArray);
+          ctx.clearRect(0, 0, audioCanvas.width, audioCanvas.height);
 
-          const barWidth = 6;
+          const barWidth = 5;
           let x = 0;
           for (let i = 0; i < 7; i++) {
-            const barHeight = Math.min(16, (dataArray[i] / 255) * 16 + 2);
+            const barHeight = Math.min(14, (dataArray[i] / 255) * 14 + 2);
             ctx.fillStyle = barHeight > 10 ? '#ef4444' : '#10b981';
-            ctx.fillRect(x, 16 - barHeight, barWidth - 2, barHeight);
+            ctx.fillRect(x, 14 - barHeight, barWidth - 1, barHeight);
             x += barWidth;
           }
         }
-        drawMeter();
+        drawWave();
       } catch (e) {
-        console.warn('AudioContext not supported', e);
+        console.warn('AudioContext unavailable', e);
       }
     }
 
-    // Toggle Microphone (Student can talk in class)
-    async function toggleAudio() {
+    // -------------------------------------------------------------
+    // 3. WebRTC Real-Time Multi-Party Media Engine & Signaling
+    // -------------------------------------------------------------
+    function initSignaling() {
+      const loc = window.location;
+      const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${loc.hostname}:${loc.port || '5000'}/ws`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        engineStatusBadge.textContent = 'Classroom Live HD';
+        engineStatusBadge.classList.add('connected');
+        
+        // Register this client into the classroom
+        ws.send(JSON.stringify({
+          type: 'join',
+          sessionId,
+          userId: currentUserId,
+          userName,
+          role: isHost ? 'host' : 'student',
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === 'peers-list') {
+            updatePeerCount(msg.peers.length + 1);
+            // Initiate WebRTC offer to each existing peer
+            for (const peer of msg.peers) {
+              createPeerConnection(peer.userId, peer.userName, true);
+            }
+          } else if (msg.type === 'peer-joined') {
+            updatePeerCount(peerConnections.size + 2);
+            showToast(`${msg.peer.userName} joined the live classroom.`);
+            // Wait for incoming offer or prepare receiver connection
+            createPeerConnection(msg.peer.userId, msg.peer.userName, false);
+          } else if (msg.type === 'signal') {
+            handleIncomingSignal(msg.fromUserId, msg.fromUserName, msg.data);
+          } else if (msg.type === 'peer-left') {
+            closePeerConnection(msg.userId);
+            updatePeerCount(peerConnections.size + 1);
+          }
+        } catch (e) {
+          console.error('[Signal processing error]', e);
+        }
+      };
+
+      ws.onclose = () => {
+        engineStatusBadge.textContent = 'Reconnecting…';
+        engineStatusBadge.classList.remove('connected');
+        setTimeout(initSignaling, 3000);
+      };
+    }
+
+    function updatePeerCount(count) {
+      peerCountBadge.textContent = `${count} in class`;
+    }
+
+    // Create RTCPeerConnection for a specific peer
+    function createPeerConnection(targetUserId, targetUserName, isInitiator) {
+      if (peerConnections.has(targetUserId)) {
+        return peerConnections.get(targetUserId);
+      }
+
+      const pc = new RTCPeerConnection(rtcConfig);
+      peerConnections.set(targetUserId, pc);
+
+      // Add local media tracks (camera & microphone)
+      if (localStream) {
+        localStream.getTracks().forEach((track) => {
+          pc.addTrack(track, localStream);
+        });
+      }
+
+      // Handle ICE Candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'signal',
+            targetUserId,
+            data: { candidate: event.candidate },
+          }));
+        }
+      };
+
+      // Handle Remote Audio/Video Track Receipt
+      pc.ontrack = (event) => {
+        const remoteStream = event.streams[0];
+        if (!remoteStream) return;
+        remoteStreams.set(targetUserId, remoteStream);
+
+        // Attach audio track to auto-playing audio element so speech is audible
+        attachRemoteAudio(targetUserId, remoteStream);
+
+        // Attach video track to stage or gallery
+        attachRemoteVideo(targetUserId, targetUserName, remoteStream);
+      };
+
+      // If initiator, generate SDP offer
+      if (isInitiator) {
+        pc.onnegotiationneeded = async () => {
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'signal',
+                targetUserId,
+                data: { sdp: pc.localDescription },
+              }));
+            }
+          } catch (err) {
+            console.error('Error creating offer', err);
+          }
+        };
+      }
+
+      return pc;
+    }
+
+    // Process incoming SDP offer/answer or ICE candidate
+    async function handleIncomingSignal(fromUserId, fromUserName, data) {
+      let pc = peerConnections.get(fromUserId);
+      if (!pc) {
+        pc = createPeerConnection(fromUserId, fromUserName, false);
+      }
+
+      try {
+        if (data.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          if (data.sdp.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'signal',
+                targetUserId: fromUserId,
+                data: { sdp: pc.localDescription },
+              }));
+            }
+          }
+        } else if (data.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      } catch (err) {
+        console.error('Error handling WebRTC signal', err);
+      }
+    }
+
+    // Play remote peer audio
+    function attachRemoteAudio(peerId, stream) {
+      let audioEl = document.getElementById(`audio_${peerId}`);
+      if (!audioEl) {
+        audioEl = document.createElement('audio');
+        audioEl.id = `audio_${peerId}`;
+        audioEl.autoplay = true;
+        audioPool.appendChild(audioEl);
+      }
+      audioEl.srcObject = stream;
+      audioEl.play().catch(() => {
+        // Autoplay policy: unlock on first interaction
+        document.body.addEventListener('click', () => audioEl.play(), { once: true });
+      });
+    }
+
+    // Display remote peer video
+    function attachRemoteVideo(peerId, peerName, stream) {
+      // If student is viewing teacher or if peer has active screen share -> Main stage
+      if (!isHost || isScreenSharing) {
+        stageVideo.srcObject = stream;
+        stageVideo.classList.remove('mirror');
+        stagePlaceholder.style.display = 'none';
+        overlayName.textContent = peerName;
+        overlayRole.textContent = 'Broadcaster';
+        const init = (peerName[0] || 'T').toUpperCase();
+        stageInitial.textContent = init;
+        overlayAvatar.textContent = init;
+      } else {
+        // Teacher viewing student: place in gallery
+        let card = document.getElementById(`card_${peerId}`);
+        if (!card) {
+          card = document.createElement('div');
+          card.id = `card_${peerId}`;
+          card.className = 'remote-peer-card';
+          card.innerHTML = `
+            <video autoplay playsinline></video>
+            <div class="remote-peer-name">${peerName}</div>
+          `;
+          remoteGallery.appendChild(card);
+        }
+        card.querySelector('video').srcObject = stream;
+      }
+    }
+
+    function closePeerConnection(peerId) {
+      if (peerConnections.has(peerId)) {
+        peerConnections.get(peerId).close();
+        peerConnections.delete(peerId);
+      }
+      remoteStreams.delete(peerId);
+      const audioEl = document.getElementById(`audio_${peerId}`);
+      if (audioEl) audioEl.remove();
+      const card = document.getElementById(`card_${peerId}`);
+      if (card) card.remove();
+    }
+
+    // -------------------------------------------------------------
+    // 4. Two-Way Media Controls (Mic, Camera, Screen Sharing)
+    // -------------------------------------------------------------
+    async function toggleMicrophone() {
       if (!localStream) {
-        await startCameraStream();
+        await initLocalMedia();
       }
       const audioTrack = localStream?.getAudioTracks()[0];
       if (!audioTrack) {
-        showToast('No microphone found on your device.');
+        showToast('Microphone device not detected.');
         return;
       }
 
-      isAudioActive = !isAudioActive;
-      audioTrack.enabled = isAudioActive;
+      isMicActive = !isMicActive;
+      audioTrack.enabled = isMicActive;
 
       if (audioContext && audioContext.state === 'suspended') {
         audioContext.resume();
       }
 
-      if (isAudioActive) {
+      if (isMicActive) {
         btnMic.classList.add('active-green');
         btnMicText.textContent = 'Mute Mic';
-        micStatusLabel.textContent = 'Speaking…';
-        micStatusLabel.style.color = '#34d399';
-        showToast('Microphone ON: You can now talk to the class.');
+        audioMeterText.textContent = 'Speaking…';
+        audioMeterText.style.color = '#34d399';
+        pipMicSvg.setAttribute('fill', '#10b981');
+        showToast('Microphone ON: Class can hear you.');
       } else {
         btnMic.classList.remove('active-green');
         btnMicText.textContent = 'Talk (Unmute)';
-        micStatusLabel.textContent = 'Mic Off';
-        micStatusLabel.style.color = '#94a3b8';
+        audioMeterText.textContent = 'Mic Muted';
+        audioMeterText.style.color = '#94a3b8';
+        pipMicSvg.setAttribute('fill', '#94a3b8');
       }
 
-      notifyParent({ type: 'AUDIO_TOGGLED', isAudioActive });
+      notifyParent({ type: 'AUDIO_TOGGLED', isAudioActive: isMicActive });
     }
 
-    // Toggle Camera (Student can open camera in class)
-    async function toggleVideo() {
+    async function toggleCamera() {
       if (!localStream) {
-        await startCameraStream();
+        await initLocalMedia();
         return;
       }
-      const videoTrack = localStream.getVideoTracks()[0];
+      const videoTrack = localStream?.getVideoTracks()[0];
       if (!videoTrack) {
-        showToast('No camera found on your device.');
+        showToast('Camera device not detected.');
         return;
       }
 
-      isVideoActive = !isVideoActive;
-      videoTrack.enabled = isVideoActive;
+      isCameraActive = !isCameraActive;
+      videoTrack.enabled = isCameraActive;
 
-      if (isVideoActive) {
-        videoPlaceholder.style.display = 'none';
+      if (isCameraActive) {
         btnCamera.classList.add('active-green');
         btnCameraText.textContent = 'Stop Video';
-        showToast('Camera ON: Video is broadcasting.');
+        pipTile.classList.add('active-pip');
+        pipVideo.style.display = 'block';
+        showToast('Camera ON: Video broadcasting.');
+        if (isHost && !screenStream) {
+          stageVideo.srcObject = localStream;
+          stagePlaceholder.style.display = 'none';
+        }
       } else {
-        videoPlaceholder.style.display = 'flex';
         btnCamera.classList.remove('active-green');
         btnCameraText.textContent = 'Open Camera';
+        pipTile.classList.remove('active-pip');
+        pipVideo.style.display = 'none';
+        if (isHost && !screenStream) {
+          stagePlaceholder.style.display = 'flex';
+        }
       }
 
-      notifyParent({ type: 'VIDEO_TOGGLED', isVideoActive });
+      notifyParent({ type: 'VIDEO_TOGGLED', isVideoActive: isCameraActive });
     }
 
-    // Screen Share
-    async function toggleShare() {
+    async function toggleScreenShare() {
       try {
-        if (screenStream) {
-          screenStream.getTracks().forEach(t => t.stop());
-          screenStream = null;
-          webcamVideo.srcObject = localStream;
-          btnShare.classList.remove('active-green');
-          btnShareText.textContent = 'Share Screen';
+        if (isScreenSharing && screenStream) {
+          stopScreenShare();
           return;
         }
 
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        webcamVideo.srcObject = screenStream;
-        btnShare.classList.add('active-green');
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 30 } },
+          audio: true,
+        });
+
+        screenStream = stream;
+        isScreenSharing = true;
+
+        const screenTrack = stream.getVideoTracks()[0];
+
+        // Replace video track in all WebRTC peer connections
+        peerConnections.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(screenTrack);
+          }
+        });
+
+        // Show screen in main stage
+        stageVideo.srcObject = stream;
+        stageVideo.classList.remove('mirror');
+        stagePlaceholder.style.display = 'none';
+
+        btnShare.classList.add('active-purple');
         btnShareText.textContent = 'Stop Share';
+        screenshareBanner.style.display = 'flex';
+        screenshareLabel.textContent = `Screen share active: ${userName}`;
+        showToast('Screen sharing live to everyone in the class.');
 
-        screenStream.getVideoTracks()[0].onended = () => {
-          btnShare.classList.remove('active-green');
-          btnShareText.textContent = 'Share Screen';
-          webcamVideo.srcObject = localStream;
-          screenStream = null;
+        // When user clicks the browser's built-in "Stop sharing" button
+        screenTrack.onended = () => {
+          stopScreenShare();
         };
+
+        notifyParent({ type: 'SHARE_TOGGLED', isShareActive: true });
       } catch (err) {
-        console.warn('Screen share canceled or failed', err);
+        console.warn('Screen share canceled/failed:', err);
       }
     }
 
-    // Toggle between Zoom SDK and Direct Live Studio
-    function toggleEngineMode() {
-      if (zoomSdkActive) {
-        launchLiveStudio();
+    function stopScreenShare() {
+      if (screenStream) {
+        screenStream.getTracks().forEach((t) => t.stop());
+        screenStream = null;
+      }
+      isScreenSharing = false;
+
+      // Replace back with camera track in all peer connections
+      const camTrack = localStream?.getVideoTracks()[0];
+      if (camTrack) {
+        peerConnections.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(camTrack);
+          }
+        });
+      }
+
+      if (isHost && localStream) {
+        stageVideo.srcObject = localStream;
+        stageVideo.classList.add('mirror');
       } else {
-        initZoomSdk();
+        stageVideo.srcObject = null;
+        stagePlaceholder.style.display = 'flex';
+      }
+
+      btnShare.classList.remove('active-purple');
+      btnShareText.textContent = 'Share Screen';
+      screenshareBanner.style.display = 'none';
+
+      notifyParent({ type: 'SHARE_TOGGLED', isShareActive: false });
+    }
+
+    function toggleSoundOutput() {
+      const audioElements = audioPool.querySelectorAll('audio');
+      const soundBtn = document.getElementById('btnSoundText');
+      if (audioElements.length > 0) {
+        const isMuted = audioElements[0].muted;
+        audioElements.forEach((a) => (a.muted = !isMuted));
+        soundBtn.textContent = !isMuted ? 'Audio Off' : 'Audio On';
       }
     }
 
-    // Parent Window Messaging Bridge
+    // -------------------------------------------------------------
+    // 5. Parent Window Bridge & Remote Command Handlers
+    // -------------------------------------------------------------
     function notifyParent(data) {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage(data, '*');
@@ -692,24 +1094,30 @@
       }
     }
 
-    // Listen to commands from parent React Native app
     window.addEventListener('message', (event) => {
       const data = event.data;
       if (!data) return;
 
       if (data.action === 'toggleMic') {
-        if (isAudioActive !== data.enabled) toggleAudio();
+        if (isMicActive !== data.enabled) toggleMicrophone();
       } else if (data.action === 'toggleCamera') {
-        if (isVideoActive !== data.enabled) toggleVideo();
+        if (isCameraActive !== data.enabled) toggleCamera();
+      } else if (data.action === 'toggleShare') {
+        toggleScreenShare();
       } else if (data.action === 'leave') {
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+        if (localStream) localStream.getTracks().forEach((t) => t.stop());
+        if (screenStream) screenStream.getTracks().forEach((t) => t.stop());
+        peerConnections.forEach((pc) => pc.close());
+        peerConnections.clear();
       }
     });
 
-    // Initialize on load
-    window.addEventListener('DOMContentLoaded', () => {
-      initZoomSdk();
+    // -------------------------------------------------------------
+    // 6. Startup Sequence
+    // -------------------------------------------------------------
+    window.addEventListener('DOMContentLoaded', async () => {
+      await initLocalMedia();
+      initSignaling();
     });
   </script>
 </body>
