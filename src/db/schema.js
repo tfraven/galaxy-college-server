@@ -155,8 +155,18 @@ export const initSchema = async () => {
       ended_at TIMESTAMPTZ,
       created_by INTEGER REFERENCES users(id),
       zoom_session_id TEXT,
-      zoom_session_pwd TEXT
+      zoom_session_pwd TEXT,
+      zoom_meeting_id TEXT,
+      zoom_passcode TEXT,
+      zoom_join_url TEXT
     )
+  `;
+
+  await sql`
+    ALTER TABLE live_sessions 
+    ADD COLUMN IF NOT EXISTS zoom_meeting_id TEXT,
+    ADD COLUMN IF NOT EXISTS zoom_passcode TEXT,
+    ADD COLUMN IF NOT EXISTS zoom_join_url TEXT
   `;
 
   await sql`

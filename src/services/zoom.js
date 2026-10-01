@@ -57,3 +57,56 @@ export const generateZoomSessionToken = ({
     isRealZoomCredentialsConfigured: isConfigured,
   };
 };
+
+/**
+ * Resolve Zoom Meeting details including direct join URL, native app deep link,
+ * and official Zoom Web Client URL.
+ */
+export const resolveZoomMeetingDetails = ({
+  sessionId,
+  customUrl,
+  customMeetingId,
+  customPasscode,
+  displayName = 'Participant',
+  isHost = false,
+}) => {
+  let meetingId = customMeetingId ? String(customMeetingId).replace(/[\s-]+/g, '') : '';
+  let passcode = customPasscode ? String(customPasscode).trim() : '';
+
+  if (customUrl && typeof customUrl === 'string') {
+    const cleanUrl = customUrl.trim();
+    // Parse meeting ID: zoom.us/j/1234567890 or confno=1234567890
+    const idMatch = cleanUrl.match(/\/(?:j|wc|s)\/(\d{9,11})/i) || cleanUrl.match(/confno=(\d{9,11})/i);
+    if (idMatch && !meetingId) {
+      meetingId = idMatch[1];
+    }
+    // Parse passcode from query: ?pwd=abcdef
+    const pwdMatch = cleanUrl.match(/[?&]pwd=([^&#]+)/i);
+    if (pwdMatch && !passcode) {
+      passcode = pwdMatch[1];
+    }
+  }
+
+  // Format a clean deterministic 10-digit meeting ID if not specified
+  if (!meetingId) {
+    const padded = String(sessionId || 1).padStart(7, '0');
+    meetingId = `852${padded}`;
+  }
+
+  if (!passcode) {
+    passcode = '123456';
+  }
+
+  const encodedName = encodeURIComponent(displayName);
+  const zoomUrl = `https://zoom.us/j/${meetingId}?pwd=${encodeURIComponent(passcode)}`;
+  const zoomAppUrl = `zoomus://zoom.us/join?confno=${meetingId}&pwd=${encodeURIComponent(passcode)}&uname=${encodedName}`;
+  const webClientUrl = `https://app.zoom.us/wc/${meetingId}/join?prefer=1&pwd=${encodeURIComponent(passcode)}&uname=${encodedName}`;
+
+  return {
+    meetingId,
+    passcode,
+    zoomUrl,
+    zoomAppUrl,
+    webClientUrl,
+  };
+};

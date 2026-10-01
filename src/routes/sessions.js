@@ -1,6 +1,6 @@
 import express from 'express';
 import { sql } from '../db/connection.js';
-import { generateZoomSessionToken } from '../services/zoom.js';
+import { generateZoomSessionToken, resolveZoomMeetingDetails } from '../services/zoom.js';
 
 export const sessionsRouter = express.Router();
 
@@ -20,6 +20,9 @@ const buildSessionDto = (s) => ({
   startedAt: s.started_at,
   endedAt: s.ended_at,
   zoomSessionId: s.zoom_session_id,
+  zoomMeetingId: s.zoom_meeting_id,
+  zoomPasscode: s.zoom_passcode,
+  zoomJoinUrl: s.zoom_join_url,
   participantCount: parseInt(s.participant_count) || 0,
 });
 
@@ -30,6 +33,7 @@ sessionsRouter.get('/', async (_req, res) => {
         s.id, s.class_id, s.section_id, s.course_name, s.title,
         s.host_id, s.plan_start, s.plan_end, s.status,
         s.started_at, s.ended_at, s.zoom_session_id,
+        s.zoom_meeting_id, s.zoom_passcode, s.zoom_join_url,
         c.name as className,
         sec.name as sectionName,
         u.full_name as hostName,
@@ -52,6 +56,7 @@ sessionsRouter.post('/', async (req, res) => {
     const {
       classId, sectionId, courseName, title, hostId,
       planStart, planEnd, status = 1,
+      zoomJoinUrl, zoomMeetingId, zoomPasscode,
     } = req.body;
 
     if (!classId || !title) {
@@ -63,9 +68,25 @@ sessionsRouter.post('/', async (req, res) => {
     const finalEnd = planEnd || new Date(now.getTime() + 90 * 60 * 1000).toISOString();
     const zoomSessionId = `zoom_session_${Date.now()}`;
 
+    // Resolve or generate clean Zoom meeting credentials
+    const resolvedMeeting = resolveZoomMeetingDetails({
+      sessionId: Date.now() % 10000000,
+      customUrl: zoomJoinUrl,
+      customMeetingId: zoomMeetingId,
+      customPasscode: zoomPasscode,
+    });
+
     const [newSession] = await sql`
-      INSERT INTO live_sessions (class_id, section_id, course_name, title, host_id, plan_start, plan_end, status, zoom_session_id)
-      VALUES (${classId}, ${sectionId || null}, ${courseName || 'General'}, ${title.trim()}, ${hostId || null}, ${finalStart}, ${finalEnd}, ${status}, ${zoomSessionId})
+      INSERT INTO live_sessions (
+        class_id, section_id, course_name, title, host_id,
+        plan_start, plan_end, status, zoom_session_id,
+        zoom_meeting_id, zoom_passcode, zoom_join_url
+      )
+      VALUES (
+        ${classId}, ${sectionId || null}, ${courseName || 'General'}, ${title.trim()}, ${hostId || null},
+        ${finalStart}, ${finalEnd}, ${status}, ${zoomSessionId},
+        ${resolvedMeeting.meetingId}, ${resolvedMeeting.passcode}, ${resolvedMeeting.zoomUrl}
+      )
       RETURNING id
     `;
 
@@ -93,6 +114,9 @@ sessionsRouter.post('/', async (req, res) => {
         status,
         participantCount: 0,
         zoomSessionId,
+        zoomMeetingId: resolvedMeeting.meetingId,
+        zoomPasscode: resolvedMeeting.passcode,
+        zoomJoinUrl: resolvedMeeting.zoomUrl,
       },
     });
   } catch (error) {
@@ -122,6 +146,7 @@ sessionsRouter.patch('/:id/status', async (req, res) => {
         s.id, s.class_id, s.section_id, s.course_name, s.title,
         s.host_id, s.plan_start, s.plan_end, s.status,
         s.started_at, s.ended_at, s.zoom_session_id,
+        s.zoom_meeting_id, s.zoom_passcode, s.zoom_join_url,
         c.name as className,
         sec.name as sectionName,
         u.full_name as hostName,
@@ -139,7 +164,7 @@ sessionsRouter.patch('/:id/status', async (req, res) => {
   }
 });
 
-// LIV-4: Issue Zoom Video SDK JWT token and record join
+// LIV-4: Issue Zoom Video SDK JWT token and Zoom Meeting Details
 sessionsRouter.post('/:id/join-token', async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
@@ -178,11 +203,22 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
     const sessionName = `class_room_${session.id}_${session.zoom_session_id || 'stream'}`;
     const displayName = user ? user.full_name : `Student_${participantId || 'Guest'}`;
 
+    // Generate Zoom Video SDK token
     const zoomTokenData = generateZoomSessionToken({
       sessionName,
       roleType: isHost ? 1 : 0,
       userIdentity: displayName,
       sessionKey: session.zoom_session_pwd || '',
+    });
+
+    // Resolve Zoom Meeting info (App deep link, official Web Client URL, meeting ID, passcode)
+    const resolvedMeeting = resolveZoomMeetingDetails({
+      sessionId: session.id,
+      customUrl: session.zoom_join_url,
+      customMeetingId: session.zoom_meeting_id,
+      customPasscode: session.zoom_passcode,
+      displayName,
+      isHost,
     });
 
     return res.json({
@@ -192,6 +228,11 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
         roomName: sessionName,
         sessionTitle: session.title,
         zoomSessionId: session.zoom_session_id,
+        meetingId: resolvedMeeting.meetingId,
+        passcode: resolvedMeeting.passcode,
+        zoomUrl: resolvedMeeting.zoomUrl,
+        zoomAppUrl: resolvedMeeting.zoomAppUrl,
+        webClientUrl: resolvedMeeting.webClientUrl,
         canTalk: true,
         canShareVideo: true,
         role: zoomTokenData.userRole,
