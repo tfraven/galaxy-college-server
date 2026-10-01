@@ -143,7 +143,8 @@ sessionsRouter.patch('/:id/status', async (req, res) => {
 sessionsRouter.post('/:id/join-token', async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
-    const { studentId } = req.body;
+    const { studentId, userId } = req.body;
+    const participantId = userId || studentId;
 
     const sessionRows = await sql`SELECT * FROM live_sessions WHERE id = ${sessionId}`;
     const session = sessionRows[0];
@@ -157,25 +158,25 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
 
     let user = null;
     let isHost = false;
-    if (studentId) {
-      const userRows = await sql`SELECT id, role, full_name, username FROM users WHERE id = ${studentId}`;
+    if (participantId) {
+      const userRows = await sql`SELECT id, role, full_name, username FROM users WHERE id = ${participantId}`;
       user = userRows[0];
       if (user && (user.role === 1 || user.role === 2 || user.id === session.host_id)) {
         isHost = true;
       }
     }
 
-    // Record attendance / join event
-    if (studentId) {
+    // Record attendance / join event for students
+    if (participantId && !isHost) {
       await sql`
         INSERT INTO session_joins (session_id, student_id)
-        VALUES (${sessionId}, ${studentId})
+        VALUES (${sessionId}, ${participantId})
         ON CONFLICT (session_id, student_id) DO NOTHING
       `;
     }
 
     const sessionName = `class_room_${session.id}_${session.zoom_session_id || 'stream'}`;
-    const displayName = user ? user.full_name : `Student_${studentId || 'Guest'}`;
+    const displayName = user ? user.full_name : `Student_${participantId || 'Guest'}`;
 
     const zoomTokenData = generateZoomSessionToken({
       sessionName,
@@ -194,6 +195,8 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
         canTalk: true,
         canShareVideo: true,
         role: zoomTokenData.userRole,
+        isHost,
+        userName: displayName,
         expiresAt: zoomTokenData.expiresAt,
         isConfigured: zoomTokenData.isRealZoomCredentialsConfigured,
       },

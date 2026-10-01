@@ -28,7 +28,8 @@ export const generateZoomSessionToken = ({
     sdkKey !== 'YOUR_ZOOM_SDK_KEY_OR_CLIENT_ID_HERE' &&
     sdkSecret !== 'YOUR_ZOOM_SDK_SECRET_HERE';
 
-  const iat = Math.floor(Date.now() / 1000);
+  // 30-second buffer against server clock skew on Zoom authorization servers
+  const iat = Math.floor(Date.now() / 1000) - 30;
   const exp = iat + durationSeconds;
 
   const payload = {

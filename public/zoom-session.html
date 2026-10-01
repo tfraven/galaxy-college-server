@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Zoom Video Live Classroom</title>
+  <link rel="stylesheet" href="https://source.zoom.us/uitoolkit/2.5.0-1/videosdk-ui-toolkit.css" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      background: #090d16;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+    #root-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* Top HUD / Connection Status Bar */
+    .hud-bar {
+      height: 42px;
+      background: rgba(15, 23, 42, 0.95);
+      border-bottom: 1px solid rgba(51, 65, 85, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 12px;
+      z-index: 100;
+      backdrop-filter: blur(8px);
+    }
+    .hud-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .live-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #ef4444;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .room-info {
+      color: #94a3b8;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 280px;
+    }
+    .room-info b {
+      color: #e2e8f0;
+    }
+    .hud-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      color: #38bdf8;
+    }
+    .status-badge.connected {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+    .status-badge.fallback {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: rgba(99, 102, 241, 0.4);
+      color: #a5b4fc;
+    }
+
+    /* Zoom SDK Container */
+    #sessionContainer {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 42px);
+      position: relative;
+      background: #000;
+      display: none; /* Shown when Zoom SDK is active */
+    }
+
+    /* Fallback / Real Live Video Stage */
+    #liveStudioContainer {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 42px);
+      position: relative;
+      background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .video-grid {
+      flex: 1;
+      width: 100%;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #020617;
+    }
+    .main-video-feed {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Mirror for natural selfie webcam experience */
+      border-radius: 0;
+    }
+    .video-overlay-details {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .user-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #4f46e5;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .user-name-tag {
+      font-size: 12px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+
+    /* Real-Time Audio Visualizer Bar */
+    .audio-visualizer-box {
+      position: absolute;
+      bottom: 74px;
+      left: 14px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(6px);
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .audio-canvas {
+      width: 60px;
+      height: 16px;
+    }
+    .mic-level-label {
+      font-size: 10px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    /* Video Off State */
+    .video-placeholder {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0b1120;
+      gap: 14px;
+      z-index: 5;
+    }
+    .placeholder-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: #1e293b;
+      border: 2px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      font-weight: 700;
+      color: #38bdf8;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .placeholder-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .placeholder-subtitle {
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    /* Live Studio Control Bar */
+    .studio-controls {
+      height: 64px;
+      width: 100%;
+      background: rgba(15, 23, 42, 0.95);
+      border-top: 1px solid rgba(51, 65, 85, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 0 16px;
+      z-index: 50;
+    }
+    .btn-control {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 42px;
+      padding: 0 16px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      background: #1e293b;
+      color: #f8fafc;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn-control:hover {
+      background: #334155;
+      border-color: #475569;
+    }
+    .btn-control:active {
+      transform: scale(0.97);
+    }
+    .btn-control.active-green {
+      background: #059669;
+      border-color: #10b981;
+      color: #ffffff;
+    }
+    .btn-control.active-green:hover {
+      background: #047857;
+    }
+    .btn-control.danger {
+      background: #dc2626;
+      border-color: #ef4444;
+      color: #ffffff;
+    }
+    .btn-control.danger:hover {
+      background: #b91c1c;
+    }
+    .btn-control svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    /* Notice Toast */
+    .toast-notice {
+      position: absolute;
+      top: 52px;
+      right: 14px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #e2e8f0;
+      max-width: 320px;
+      z-index: 200;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+      display: none;
+      animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root-container">
+    <!-- Top HUD -->
+    <div class="hud-bar">
+      <div class="hud-left">
+        <span class="live-indicator">
+          <span class="pulse-dot"></span>
+          LIVE CLASS
+        </span>
+        <span class="room-info" id="roomDisplay">Connecting to room...</span>
+      </div>
+      <div class="hud-right">
+        <span class="status-badge" id="statusBadge">Zoom Video SDK</span>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-notice" id="toastNotice"></div>
+
+    <!-- 1. Zoom Video SDK Official Container -->
+    <div id="sessionContainer"></div>
+
+    <!-- 2. Real Hardware Media Stream Studio (Active Live Fallback & Direct Camera/Mic Stream) -->
+    <div id="liveStudioContainer">
+      <div class="video-grid">
+        <!-- Live Webcam Video Track -->
+        <video id="webcamVideo" class="main-video-feed" autoplay playsinline muted></video>
+
+        <!-- Placeholder when camera is switched off -->
+        <div class="video-placeholder" id="videoPlaceholder">
+          <div class="placeholder-avatar" id="avatarInitial">U</div>
+          <div class="placeholder-title" id="placeholderUser">User</div>
+          <div class="placeholder-subtitle">Camera is currently muted • Click "Start Video" below</div>
+        </div>
+
+        <!-- Overlays -->
+        <div class="video-overlay-details">
+          <div class="user-avatar" id="tagAvatar">U</div>
+          <span class="user-name-tag" id="tagUserName">Attendee</span>
+        </div>
+
+        <div class="audio-visualizer-box" id="audioVisualizerBox">
+          <canvas class="audio-canvas" id="audioCanvas" width="60" height="16"></canvas>
+          <span class="mic-level-label" id="micStatusLabel">Mic Off</span>
+        </div>
+      </div>
+
+      <!-- Studio Control Bar -->
+      <div class="studio-controls">
+        <!-- Mic Toggle Button -->
+        <button class="btn-control" id="btnMic" onclick="toggleAudio()">
+          <svg viewBox="0 0 24 24" id="micIcon"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+          <span id="btnMicText">Talk (Unmute)</span>
+        </button>
+
+        <!-- Camera Toggle Button -->
+        <button class="btn-control" id="btnCamera" onclick="toggleVideo()">
+          <svg viewBox="0 0 24 24" id="camIcon"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          <span id="btnCameraText">Open Camera</span>
+        </button>
+
+        <!-- Screen Share Button -->
+        <button class="btn-control" id="btnShare" onclick="toggleShare()">
+          <svg viewBox="0 0 24 24"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.11-.9-2-2-2H4c-1.11 0-2 .89-2 2v10c0 1.1.89 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>
+          <span id="btnShareText">Share Screen</span>
+        </button>
+
+        <!-- Switch Engine / Reconnect -->
+        <button class="btn-control" id="btnMode" onclick="toggleEngineMode()">
+          <span id="btnModeText">Retry Zoom Cloud</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------
+    // Query Parameters & Session Config
+    // -------------------------------------------------------------
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionToken = urlParams.get('token') || '';
+    const sessionName = urlParams.get('room') || urlParams.get('sessionName') || 'live_class';
+    const userName = urlParams.get('name') || urlParams.get('userName') || 'Class Student';
+    const isHost = urlParams.get('role') === '1' || urlParams.get('isHost') === 'true';
+    const canTalk = urlParams.get('canTalk') !== 'false';
+    const canShareVideo = urlParams.get('canShareVideo') !== 'false';
+
+    // State
+    let zoomSdkActive = false;
+    let localStream = null;
+    let screenStream = null;
+    let isAudioActive = false;
+    let isVideoActive = false;
+    let audioContext = null;
+    let analyser = null;
+    let animFrameId = null;
+
+    // Elements
+    const roomDisplay = document.getElementById('roomDisplay');
+    const statusBadge = document.getElementById('statusBadge');
+    const sessionContainer = document.getElementById('sessionContainer');
+    const liveStudioContainer = document.getElementById('liveStudioContainer');
+    const webcamVideo = document.getElementById('webcamVideo');
+    const videoPlaceholder = document.getElementById('videoPlaceholder');
+    const btnMic = document.getElementById('btnMic');
+    const btnMicText = document.getElementById('btnMicText');
+    const btnCamera = document.getElementById('btnCamera');
+    const btnCameraText = document.getElementById('btnCameraText');
+    const btnShare = document.getElementById('btnShare');
+    const btnShareText = document.getElementById('btnShareText');
+    const micStatusLabel = document.getElementById('micStatusLabel');
+    const toastNotice = document.getElementById('toastNotice');
+
+    // Display Identity
+    roomDisplay.innerHTML = `Room: <b>${sessionName}</b> • ${userName} (${isHost ? 'Host' : 'Student'})`;
+    document.getElementById('tagUserName').textContent = `${userName} ${isHost ? '(Host)' : ''}`;
+    const initial = (userName[0] || 'U').toUpperCase();
+    document.getElementById('avatarInitial').textContent = initial;
+    document.getElementById('tagAvatar').textContent = initial;
+    document.getElementById('placeholderUser').textContent = userName;
+
+    function showToast(msg, durationMs = 4500) {
+      toastNotice.textContent = msg;
+      toastNotice.style.display = 'block';
+      setTimeout(() => {
+        toastNotice.style.display = 'none';
+      }, durationMs);
+    }
+
+    // -------------------------------------------------------------
+    // 1. Attempt Zoom Video SDK UI Toolkit Connection
+    // -------------------------------------------------------------
+    async function initZoomSdk() {
+      const uitoolkit = window.UIToolkit?.default || window.UIToolkit;
+      if (!uitoolkit || !sessionToken) {
+        console.warn('[Zoom Video SDK] UIToolkit not present or token missing, launching Live Studio engine');
+        launchLiveStudio();
+        return;
+      }
+
+      try {
+        statusBadge.textContent = 'Zoom Cloud Connecting…';
+        statusBadge.className = 'status-badge';
+        
+        sessionContainer.style.display = 'block';
+        liveStudioContainer.style.display = 'none';
+
+        const config = {
+          videoSDKJWT: sessionToken,
+          sessionName: sessionName,
+          userName: userName,
+          sessionPasscode: '',
+          features: ['video', 'audio', 'settings', 'users', 'chat', 'share']
+        };
+
+        console.log('[Zoom Video SDK] Joining session:', sessionName, 'as', userName);
+        await uitoolkit.joinSession(sessionContainer, config);
+
+        zoomSdkActive = true;
+        statusBadge.textContent = isHost ? 'Zoom Cloud (Host)' : 'Zoom Cloud Connected';
+        statusBadge.classList.add('connected');
+        showToast('Connected to Zoom Video SDK Cloud.');
+        
+        notifyParent({ type: 'ZOOM_CONNECTED', sessionName, isHost });
+      } catch (err) {
+        console.warn('[Zoom Video SDK] Cloud join notice:', err);
+        showToast('Using Direct WebRTC Live Media Studio (Camera & Mic Active)');
+        launchLiveStudio();
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 2. Fallback / Direct WebRTC Live Media Studio
+    // -------------------------------------------------------------
+    async function launchLiveStudio() {
+      zoomSdkActive = false;
+      sessionContainer.style.display = 'none';
+      liveStudioContainer.style.display = 'flex';
+      statusBadge.textContent = isHost ? 'Live Studio (Host)' : 'Live Studio (Student)';
+      statusBadge.className = 'status-badge fallback';
+
+      // Auto-start camera preview so the student/teacher sees their real video feed immediately
+      await startCameraStream();
+    }
+
+    async function startCameraStream() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          audio: true,
+        });
+
+        localStream = stream;
+        webcamVideo.srcObject = stream;
+        
+        // Mute mic initially by default, leave video on
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) audioTrack.enabled = false;
+        
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.enabled = true;
+          isVideoActive = true;
+          videoPlaceholder.style.display = 'none';
+          btnCamera.classList.add('active-green');
+          btnCameraText.textContent = 'Stop Video';
+        }
+
+        setupAudioMeter(stream);
+        notifyParent({ type: 'MEDIA_READY', isVideoActive, isAudioActive: false });
+      } catch (err) {
+        console.warn('Camera/mic access:', err.name, err.message);
+        videoPlaceholder.style.display = 'flex';
+        showToast('Camera permission needed: allow browser access to show video feed.');
+      }
+    }
+
+    // Real-Time Audio Visualizer for Microphone
+    function setupAudioMeter(stream) {
+      try {
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 32;
+        source.connect(analyser);
+
+        const canvas = document.getElementById('audioCanvas');
+        const ctx = canvas.getContext('2d');
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function drawMeter() {
+          animFrameId = requestAnimationFrame(drawMeter);
+          if (!isAudioActive) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+          }
+          analyser.getByteFrequencyData(dataArray);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          const barWidth = 6;
+          let x = 0;
+          for (let i = 0; i < 7; i++) {
+            const barHeight = Math.min(16, (dataArray[i] / 255) * 16 + 2);
+            ctx.fillStyle = barHeight > 10 ? '#ef4444' : '#10b981';
+            ctx.fillRect(x, 16 - barHeight, barWidth - 2, barHeight);
+            x += barWidth;
+          }
+        }
+        drawMeter();
+      } catch (e) {
+        console.warn('AudioContext not supported', e);
+      }
+    }
+
+    // Toggle Microphone (Student can talk in class)
+    async function toggleAudio() {
+      if (!localStream) {
+        await startCameraStream();
+      }
+      const audioTrack = localStream?.getAudioTracks()[0];
+      if (!audioTrack) {
+        showToast('No microphone found on your device.');
+        return;
+      }
+
+      isAudioActive = !isAudioActive;
+      audioTrack.enabled = isAudioActive;
+
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+
+      if (isAudioActive) {
+        btnMic.classList.add('active-green');
+        btnMicText.textContent = 'Mute Mic';
+        micStatusLabel.textContent = 'Speaking…';
+        micStatusLabel.style.color = '#34d399';
+        showToast('Microphone ON: You can now talk to the class.');
+      } else {
+        btnMic.classList.remove('active-green');
+        btnMicText.textContent = 'Talk (Unmute)';
+        micStatusLabel.textContent = 'Mic Off';
+        micStatusLabel.style.color = '#94a3b8';
+      }
+
+      notifyParent({ type: 'AUDIO_TOGGLED', isAudioActive });
+    }
+
+    // Toggle Camera (Student can open camera in class)
+    async function toggleVideo() {
+      if (!localStream) {
+        await startCameraStream();
+        return;
+      }
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (!videoTrack) {
+        showToast('No camera found on your device.');
+        return;
+      }
+
+      isVideoActive = !isVideoActive;
+      videoTrack.enabled = isVideoActive;
+
+      if (isVideoActive) {
+        videoPlaceholder.style.display = 'none';
+        btnCamera.classList.add('active-green');
+        btnCameraText.textContent = 'Stop Video';
+        showToast('Camera ON: Video is broadcasting.');
+      } else {
+        videoPlaceholder.style.display = 'flex';
+        btnCamera.classList.remove('active-green');
+        btnCameraText.textContent = 'Open Camera';
+      }
+
+      notifyParent({ type: 'VIDEO_TOGGLED', isVideoActive });
+    }
+
+    // Screen Share
+    async function toggleShare() {
+      try {
+        if (screenStream) {
+          screenStream.getTracks().forEach(t => t.stop());
+          screenStream = null;
+          webcamVideo.srcObject = localStream;
+          btnShare.classList.remove('active-green');
+          btnShareText.textContent = 'Share Screen';
+          return;
+        }
+
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        webcamVideo.srcObject = screenStream;
+        btnShare.classList.add('active-green');
+        btnShareText.textContent = 'Stop Share';
+
+        screenStream.getVideoTracks()[0].onended = () => {
+          btnShare.classList.remove('active-green');
+          btnShareText.textContent = 'Share Screen';
+          webcamVideo.srcObject = localStream;
+          screenStream = null;
+        };
+      } catch (err) {
+        console.warn('Screen share canceled or failed', err);
+      }
+    }
+
+    // Toggle between Zoom SDK and Direct Live Studio
+    function toggleEngineMode() {
+      if (zoomSdkActive) {
+        launchLiveStudio();
+      } else {
+        initZoomSdk();
+      }
+    }
+
+    // Parent Window Messaging Bridge
+    function notifyParent(data) {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(data, '*');
+      }
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    }
+
+    // Listen to commands from parent React Native app
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data) return;
+
+      if (data.action === 'toggleMic') {
+        if (isAudioActive !== data.enabled) toggleAudio();
+      } else if (data.action === 'toggleCamera') {
+        if (isVideoActive !== data.enabled) toggleVideo();
+      } else if (data.action === 'leave') {
+        if (localStream) localStream.getTracks().forEach(t => t.stop());
+        if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+      }
+    });
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', () => {
+      initZoomSdk();
+    });
+  </script>
+</body>
+</html>

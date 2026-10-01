@@ -14,12 +14,27 @@ import { testsRouter } from './routes/tests.js';
 import { examRouter } from './routes/exam.js';
 import { sessionsRouter } from './routes/sessions.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const publicDir = path.join(__dirname, '../public');
+
 const app = express();
 
 // Middlewares
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static assets with permissive isolation headers for Zoom Video SDK Web
+app.use((_req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  next();
+});
+app.use(express.static(publicDir));
 
 // Health Check
 app.get('/api/v1/health', (_req, res) => {
