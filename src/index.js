@@ -28,9 +28,11 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static assets with permissive isolation headers for Zoom Video SDK Web
-app.use((_req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+// classroom.html needs COOP + COEP to enable SharedArrayBuffer (required by Zoom Audio SDK).
+// These are scoped to just that document — applying them globally would block cross-origin
+// subresources (images, fonts, etc.) that don't carry a Cross-Origin-Resource-Policy header.
+app.use('/classroom.html', (_req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
   next();
 });
