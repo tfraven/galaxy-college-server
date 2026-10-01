@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Live Classroom</title>
+  <link
+    rel="stylesheet"
+    href="https://source.zoom.us/videosdk/zoom-video-client-view-2.18.0.min.css"
+    crossorigin="anonymous"
+  />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #090d16; font-family: system-ui, sans-serif; color: #e2e8f0; }
+    #zoom-root { width: 100%; height: 100%; }
+    #status-overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+      background: #090d16; transition: opacity 0.4s ease; z-index: 9999;
+    }
+    #status-overlay.hidden { opacity: 0; pointer-events: none; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(99, 102, 241, 0.2); border-top-color: #6366f1;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #status-msg { font-size: 14px; color: #94a3b8; }
+    #error-card {
+      position: fixed; inset: 0; display: none; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      padding: 32px; background: #090d16; text-align: center;
+    }
+    #error-card.visible { display: flex; }
+    .error-icon { font-size: 40px; }
+    #error-msg { font-size: 14px; color: #f87171; max-width: 320px; line-height: 1.5; }
+    #retry-btn {
+      margin-top: 8px; padding: 10px 24px; background: #6366f1;
+      color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;
+    }
+    #retry-btn:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <div id="zoom-root"></div>
+  <div id="status-overlay">
+    <div class="spinner"></div>
+    <p id="status-msg">Connecting to classroom...</p>
+  </div>
+  <div id="error-card">
+    <div class="error-icon">??</div>
+    <p id="error-msg">Could not connect to the classroom.</p>
+    <button id="retry-btn" onclick="location.reload()">Try again</button>
+  </div>
+
+  <script src="https://source.zoom.us/videosdk/zoom-video-client-view-2.18.0.min.js" crossorigin="anonymous"></script>
+  <script>
+    function postToParent(type, extra) {
+      var payload = JSON.stringify(Object.assign({ type: type }, extra));
+      try { if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage(payload); return; } } catch (_) {}
+      if (window.parent !== window) window.parent.postMessage(payload, '*');
+    }
+    function setStatus(msg) { document.getElementById('status-msg').textContent = msg; }
+    function showError(msg) {
+      document.getElementById('status-overlay').classList.add('hidden');
+      document.getElementById('error-msg').textContent = msg;
+      document.getElementById('error-card').classList.add('visible');
+      postToParent('error', { message: msg });
+    }
+    function parseHash() {
+      var hash = window.location.hash.slice(1);
+      var params = {};
+      hash.split('&').forEach(function(pair) {
+        var idx = pair.indexOf('=');
+        if (idx > -1) params[pair.slice(0, idx)] = decodeURIComponent(pair.slice(idx + 1));
+      });
+      return params;
+    }
+    (async function() {
+      var p = parseHash();
+      var token = p.t, sessionName = p.s, userName = p.n;
+      if (!token || !sessionName || !userName) { showError('Missing session parameters. Please go back and try again.'); return; }
+      if (typeof ZoomVideo === 'undefined') { showError('Zoom SDK failed to load. Check your internet connection.'); return; }
+      var SDK_KEY = '7YP6DyYOQOCWHx6lz1mX4g';
+      var client;
+      try {
+        setStatus('Initialising...');
+        client = ZoomVideo.createClient();
+        await client.init('en-US', 'Global', { patchJsMedia: true, stayAwake: true });
+        setStatus('Joining class...');
+        await client.join(sessionName, token, userName);
+        document.getElementById('status-overlay').classList.add('hidden');
+        postToParent('joined');
+        var stream = client.getMediaStream();
+        try { await stream.startAudio(); } catch (_) {}
+        try { await stream.startVideo({ videoElement: document.getElementById('zoom-root') }); } catch (_) {}
+        client.on('connection-change', function(s) {
+          if (s.state === 'Closed' || s.state === 'Fail') postToParent('closed');
+        });
+        client.on('session-end-request', function() { postToParent('closed'); });
+      } catch (err) {
+        console.error('[Classroom]', err);
+        var reason = (err && (err.reason || err.message)) || String(err);
+        var msg = 'Could not join the class. Please try again.';
+        if (/token/i.test(reason)) msg = 'Session token expired. Go back and rejoin.';
+        if (/network/i.test(reason)) msg = 'Network error. Check your connection.';
+        showError(msg);
+      }
+    })();
+  </script>
+</body>
+</html>
