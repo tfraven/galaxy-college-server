@@ -168,5 +168,17 @@ export const initSchema = async () => {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS session_messages (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      sender_name TEXT NOT NULL,
+      sender_role TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
   console.log('PostgreSQL schema initialized successfully.');
 };

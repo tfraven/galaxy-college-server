@@ -161,7 +161,7 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
     if (participantId) {
       const userRows = await sql`SELECT id, role, full_name, username FROM users WHERE id = ${participantId}`;
       user = userRows[0];
-      if (user && (user.role === 1 || user.role === 2 || user.id === session.host_id)) {
+      if (user && (user.role === 1 || user.role === 2 || user.role === 3 || user.id === session.host_id)) {
         isHost = true;
       }
     }
@@ -201,6 +201,59 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
         isConfigured: zoomTokenData.isRealZoomCredentialsConfigured,
       },
     });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// LIV-5: Get live class messages
+sessionsRouter.get('/:id/messages', async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id, 10);
+    const messages = await sql`
+      SELECT id, session_id as "sessionId", user_id as "userId",
+             sender_name as "senderName", sender_role as "senderRole",
+             message, created_at as "createdAt"
+      FROM session_messages
+      WHERE session_id = ${sessionId}
+      ORDER BY created_at ASC
+      LIMIT 200
+    `;
+    return res.json({ success: true, data: messages });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// LIV-6: Post a live class chat message
+sessionsRouter.post('/:id/messages', async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id, 10);
+    const { userId, message } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ success: false, error: 'Message cannot be empty' });
+    }
+
+    let senderName = 'Class Member';
+    let senderRole = 'Student';
+
+    if (userId) {
+      const userRows = await sql`SELECT full_name, role FROM users WHERE id = ${userId}`;
+      if (userRows[0]) {
+        senderName = userRows[0].full_name;
+        senderRole = (userRows[0].role === 1 || userRows[0].role === 2 || userRows[0].role === 3) ? 'Faculty' : 'Student';
+      }
+    }
+
+    const [saved] = await sql`
+      INSERT INTO session_messages (session_id, user_id, sender_name, sender_role, message)
+      VALUES (${sessionId}, ${userId || 1}, ${senderName}, ${senderRole}, ${message.trim()})
+      RETURNING id, session_id as "sessionId", user_id as "userId",
+                sender_name as "senderName", sender_role as "senderRole",
+                message, created_at as "createdAt"
+    `;
+
+    return res.status(201).json({ success: true, data: saved });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

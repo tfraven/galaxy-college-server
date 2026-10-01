@@ -110,17 +110,125 @@ const autoSubmitExpiredAttempts = async () => {
 
 setInterval(autoSubmitExpiredAttempts, 30000); // Check every 30s
 
+import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+
+// Expose HTTP server for Express and WebSockets
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Store session peers: sessionId -> Set of { ws, userId, userName, role }
+const sessionPeers = new Map();
+
+wss.on('connection', (ws) => {
+  let currentSessionId = null;
+  let currentUser = null;
+
+  ws.on('message', (messageRaw) => {
+    try {
+      const msg = JSON.parse(messageRaw);
+
+      if (msg.type === 'join') {
+        currentSessionId = String(msg.sessionId);
+        currentUser = {
+          ws,
+          userId: msg.userId,
+          userName: msg.userName,
+          role: msg.role,
+        };
+
+        if (!sessionPeers.has(currentSessionId)) {
+          sessionPeers.set(currentSessionId, new Set());
+        }
+        const roomSet = sessionPeers.get(currentSessionId);
+        roomSet.add(currentUser);
+
+        // Send existing peers list to the newly joined peer
+        const peersInRoom = Array.from(roomSet)
+          .filter(p => p.ws !== ws && p.ws.readyState === WebSocket.OPEN)
+          .map(p => ({ userId: p.userId, userName: p.userName, role: p.role }));
+
+        ws.send(JSON.stringify({
+          type: 'peers-list',
+          peers: peersInRoom,
+        }));
+
+        // Broadcast peer-joined to existing peers
+        roomSet.forEach(peer => {
+          if (peer.ws !== ws && peer.ws.readyState === WebSocket.OPEN) {
+            peer.ws.send(JSON.stringify({
+              type: 'peer-joined',
+              peer: { userId: msg.userId, userName: msg.userName, role: msg.role },
+            }));
+          }
+        });
+      } else if (msg.type === 'signal') {
+        // Forward WebRTC signal (offer/answer/candidate) to specific peer
+        const targetUserId = msg.targetUserId;
+        const peers = sessionPeers.get(currentSessionId);
+        if (peers) {
+          peers.forEach(peer => {
+            if (String(peer.userId) === String(targetUserId) && peer.ws.readyState === WebSocket.OPEN) {
+              peer.ws.send(JSON.stringify({
+                type: 'signal',
+                fromUserId: currentUser?.userId,
+                fromUserName: currentUser?.userName,
+                data: msg.data,
+              }));
+            }
+          });
+        }
+      } else if (msg.type === 'chat') {
+        // Broadcast chat to all peers in the session room
+        const peers = sessionPeers.get(currentSessionId);
+        if (peers) {
+          peers.forEach(peer => {
+            if (peer.ws.readyState === WebSocket.OPEN) {
+              peer.ws.send(JSON.stringify({
+                type: 'chat',
+                message: msg.message,
+              }));
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[WS error]', e);
+    }
+  });
+
+  ws.on('close', () => {
+    if (currentSessionId && currentUser && sessionPeers.has(currentSessionId)) {
+      const peers = sessionPeers.get(currentSessionId);
+      peers.delete(currentUser);
+      if (peers.size === 0) {
+        sessionPeers.delete(currentSessionId);
+      } else {
+        peers.forEach(peer => {
+          if (peer.ws.readyState === WebSocket.OPEN) {
+            peer.ws.send(JSON.stringify({
+              type: 'peer-left',
+              userId: currentUser.userId,
+            }));
+          }
+        });
+      }
+    }
+  });
+});
+
 // Start Server
 const startServer = async () => {
   try {
     await initSchema();
     await seedDatabase();
 
-    app.listen(config.port, () => {
+    server.listen(config.port, () => {
       console.log(`===============================================`);
       console.log(`  College Runner Server running on port ${config.port}`);
       console.log(`  Database: Neon PostgreSQL`);
       console.log(`  API Base URL: http://localhost:${config.port}/api/v1`);
+      console.log(`  WebSocket URL: ws://localhost:${config.port}/ws`);
       console.log(`  Health Check: http://localhost:${config.port}/api/v1/health`);
       console.log(`===============================================`);
     });
