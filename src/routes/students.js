@@ -1,99 +1,103 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import { db } from '../db/connection.js';
+import { sql } from '../db/connection.js';
 
 export const studentsRouter = express.Router();
 
-studentsRouter.get('/', (_req, res) => {
+studentsRouter.get('/', async (_req, res) => {
   try {
-    const students = db.prepare(`
-      SELECT 
-        s.user_id as userId,
-        u.username as rollNo,
-        u.full_name as fullName,
+    const students = await sql`
+      SELECT
+        s.user_id as "userId",
+        u.username as "rollNo",
+        u.full_name as "fullName",
         u.phone,
-        s.class_id as classId,
-        c.name as className,
-        s.section_id as sectionId,
-        sec.name as sectionName,
-        u.is_active as isActive
+        s.class_id as "classId",
+        c.name as "className",
+        s.section_id as "sectionId",
+        sec.name as "sectionName",
+        u.is_active as "isActive"
       FROM students s
       JOIN users u ON s.user_id = u.id
       JOIN classes c ON s.class_id = c.id
       LEFT JOIN sections sec ON s.section_id = sec.id
       ORDER BY s.user_id ASC
-    `).all();
-
+    `;
     return res.json({ success: true, data: students });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-studentsRouter.post('/', (req, res) => {
+studentsRouter.post('/', async (req, res) => {
   const { fullName, rollNo, classId, sectionId, phone } = req.body;
   if (!fullName || !rollNo || !classId) {
     return res.status(400).json({ success: false, error: 'Full name, roll number, and class are required' });
   }
 
-  const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(rollNo.trim());
-  if (existing) {
-    return res.status(400).json({ success: false, error: `Roll number "${rollNo}" already exists` });
-  }
-
-  const defaultHash = bcrypt.hashSync('student123', 10);
-
-  const transaction = db.transaction(() => {
-    const userRes = db.prepare(`
-      INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
-      VALUES (4, ?, ?, ?, ?, 1, 1)
-    `).run(rollNo.trim(), defaultHash, fullName.trim(), phone || null);
-
-    const userId = userRes.lastInsertRowid;
-
-    db.prepare(`
-      INSERT INTO students (user_id, class_id, section_id)
-      VALUES (?, ?, ?)
-    `).run(userId, classId, sectionId || null);
-
-    const cls = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId);
-    const sec = sectionId ? db.prepare('SELECT name FROM sections WHERE id = ?').get(sectionId) : null;
-
-    return {
-      user: {
-        id: userId,
-        role: 4,
-        username: rollNo.trim(),
-        fullName: fullName.trim(),
-        phone: phone || null,
-        isActive: true,
-        mustChangePw: true,
-      },
-      student: {
-        userId,
-        rollNo: rollNo.trim(),
-        classId,
-        className: cls ? cls.name : '',
-        sectionId: sectionId || null,
-        sectionName: sec ? sec.name : null,
-      },
-    };
-  });
-
   try {
-    const data = transaction();
-    return res.status(201).json({ success: true, data });
+    const existing = await sql`
+      SELECT id FROM users WHERE LOWER(username) = LOWER(${rollNo.trim()})
+    `;
+    if (existing.length > 0) {
+      return res.status(400).json({ success: false, error: `Roll number "${rollNo}" already exists` });
+    }
+
+    const defaultHash = await bcrypt.hash('student123', 10);
+
+    const [newUser] = await sql`
+      INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
+      VALUES (4, ${rollNo.trim()}, ${defaultHash}, ${fullName.trim()}, ${phone || null}, TRUE, TRUE)
+      RETURNING id
+    `;
+
+    const userId = newUser.id;
+
+    await sql`
+      INSERT INTO students (user_id, class_id, section_id)
+      VALUES (${userId}, ${classId}, ${sectionId || null})
+    `;
+
+    const [cls] = await sql`SELECT name FROM classes WHERE id = ${classId}`;
+    let sec = null;
+    if (sectionId) {
+      const rows = await sql`SELECT name FROM sections WHERE id = ${sectionId}`;
+      sec = rows[0];
+    }
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        user: {
+          id: userId,
+          role: 4,
+          username: rollNo.trim(),
+          fullName: fullName.trim(),
+          phone: phone || null,
+          isActive: true,
+          mustChangePw: true,
+        },
+        student: {
+          userId,
+          rollNo: rollNo.trim(),
+          classId,
+          className: cls ? cls.name : '',
+          sectionId: sectionId || null,
+          sectionName: sec ? sec.name : null,
+        },
+      },
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// STU-4 & STU-5: Preview bulk upload
-studentsRouter.post('/preview-bulk', (req, res) => {
+// Preview bulk upload
+studentsRouter.post('/preview-bulk', async (req, res) => {
   try {
     const { prefix = 'PE1-', startNumber = 1001, padding = 4, sampleRows = [] } = req.body;
 
-    const existingUsers = db.prepare('SELECT LOWER(username) as username FROM users').all();
+    const existingUsers = await sql`SELECT LOWER(username) as username FROM users`;
     const existingUsernames = new Set(existingUsers.map((u) => u.username));
 
     let currentNum = parseInt(startNumber, 10) || 1001;
@@ -119,83 +123,47 @@ studentsRouter.post('/preview-bulk', (req, res) => {
         }
       }
 
-      return {
-        rowNum: idx + 1,
-        fullName: r.fullName,
-        generatedRollNo,
-        classId: r.classId,
-        valid,
-        error,
-      };
+      return { rowNum: idx + 1, fullName: r.fullName, generatedRollNo, classId: r.classId, valid, error };
     });
 
     const totalValid = previewRows.filter((r) => r.valid).length;
-    return res.json({
-      success: true,
-      data: {
-        previewRows,
-        totalValid,
-      },
-    });
+    return res.json({ success: true, data: { previewRows, totalValid } });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// STU-6: Commit bulk upload in a single transaction
-studentsRouter.post('/commit-bulk', (req, res) => {
+// Commit bulk upload
+studentsRouter.post('/commit-bulk', async (req, res) => {
   try {
     const { validRows = [] } = req.body;
     if (!validRows.length) {
       return res.status(400).json({ success: false, error: 'No valid rows provided' });
     }
 
-    const defaultHash = bcrypt.hashSync('student123', 10);
     const credentials = [];
 
-    const insertUserStmt = db.prepare(`
-      INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
-      VALUES (4, ?, ?, ?, ?, 1, 1)
-    `);
+    for (const row of validRows) {
+      const tempPass = `Pass@${Math.floor(1000 + Math.random() * 9000)}`;
+      const userHash = await bcrypt.hash(tempPass, 10);
 
-    const insertStudentStmt = db.prepare(`
-      INSERT INTO students (user_id, class_id, section_id)
-      VALUES (?, ?, ?)
-    `);
+      const [newUser] = await sql`
+        INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
+        VALUES (4, ${row.generatedRollNo}, ${userHash}, ${row.fullName}, ${row.phone || null}, TRUE, TRUE)
+        RETURNING id
+      `;
 
-    const commitTx = db.transaction(() => {
-      for (const row of validRows) {
-        const tempPass = `Pass@${Math.floor(1000 + Math.random() * 9000)}`;
-        const userHash = bcrypt.hashSync(tempPass, 10);
+      await sql`
+        INSERT INTO students (user_id, class_id, section_id)
+        VALUES (${newUser.id}, ${row.classId}, ${row.sectionId || null})
+      `;
 
-        const userRes = insertUserStmt.run(
-          row.generatedRollNo,
-          userHash,
-          row.fullName,
-          row.phone || null
-        );
-
-        insertStudentStmt.run(
-          userRes.lastInsertRowid,
-          row.classId,
-          row.sectionId || null
-        );
-
-        credentials.push({
-          rollNo: row.generatedRollNo,
-          tempPass,
-        });
-      }
-    });
-
-    commitTx();
+      credentials.push({ rollNo: row.generatedRollNo, tempPass });
+    }
 
     return res.json({
       success: true,
-      data: {
-        importedCount: validRows.length,
-        credentials,
-      },
+      data: { importedCount: validRows.length, credentials },
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

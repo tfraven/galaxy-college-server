@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/index.js';
-import { db } from './db/connection.js';
+import { sql } from './db/connection.js';
 import { initSchema } from './db/schema.js';
 import { seedDatabase } from './db/seed.js';
 
@@ -25,6 +25,7 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/api/v1/health', (_req, res) => {
   res.json({
     status: 'ok',
+    db: 'neon-postgresql',
     timestamp: new Date().toISOString(),
     service: 'College Runner API',
     zoomSdkConfigured: Boolean(config.zoom.sdkKey && config.zoom.sdkKey !== 'YOUR_ZOOM_SDK_KEY_OR_CLIENT_ID_HERE'),
@@ -42,24 +43,27 @@ app.use('/api/v1/exam', examRouter);
 app.use('/api/v1/sessions', sessionsRouter);
 
 // EXM-7: Background job to auto-submit expired exam attempts
-const autoSubmitExpiredAttempts = () => {
+const autoSubmitExpiredAttempts = async () => {
   try {
     const now = new Date().toISOString();
-    const expired = db.prepare(`
+    const expired = await sql`
       SELECT id, test_id FROM attempts
-      WHERE submitted_at IS NULL AND deadline_at <= ?
-    `).all(now);
+      WHERE submitted_at IS NULL AND deadline_at <= ${now}
+    `;
 
     for (const att of expired) {
-      const test = db.prepare('SELECT mark_per_q, neg_mark FROM tests WHERE id = ?').get(att.test_id);
-      const questions = db.prepare(`
+      const testRows = await sql`SELECT mark_per_q, neg_mark FROM tests WHERE id = ${att.test_id}`;
+      const test = testRows[0];
+      const questions = await sql`
         SELECT q.id, q.correct
         FROM questions q
         JOIN test_questions tq ON q.id = tq.question_id
-        WHERE tq.test_id = ?
-      `).all(att.test_id);
+        WHERE tq.test_id = ${att.test_id}
+      `;
 
-      const answers = db.prepare('SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ?').all(att.id);
+      const answers = await sql`
+        SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${att.id}
+      `;
       const answersMap = {};
       for (const a of answers) answersMap[a.question_id] = a.chosen;
 
@@ -72,13 +76,15 @@ const autoSubmitExpiredAttempts = () => {
         else if (chosen) wrongCnt++;
       }
 
-      const score = Math.max(0, correctCnt * (test?.mark_per_q || 1) - wrongCnt * (test?.neg_mark || 0));
+      const markPerQ = parseFloat(test?.mark_per_q || 1);
+      const negMark = parseFloat(test?.neg_mark || 0);
+      const score = Math.max(0, correctCnt * markPerQ - wrongCnt * negMark);
 
-      db.prepare(`
+      await sql`
         UPDATE attempts
-        SET submitted_at = ?, correct_cnt = ?, wrong_cnt = ?, score = ?
-        WHERE id = ?
-      `).run(now, correctCnt, wrongCnt, score, att.id);
+        SET submitted_at = ${now}, correct_cnt = ${correctCnt}, wrong_cnt = ${wrongCnt}, score = ${score}
+        WHERE id = ${att.id}
+      `;
 
       console.log(`[EXM-7 Auto-Submit] Finalized expired attempt #${att.id}`);
     }
@@ -92,12 +98,13 @@ setInterval(autoSubmitExpiredAttempts, 30000); // Check every 30s
 // Start Server
 const startServer = async () => {
   try {
-    initSchema();
+    await initSchema();
     await seedDatabase();
 
     app.listen(config.port, () => {
       console.log(`===============================================`);
       console.log(`  College Runner Server running on port ${config.port}`);
+      console.log(`  Database: Neon PostgreSQL`);
       console.log(`  API Base URL: http://localhost:${config.port}/api/v1`);
       console.log(`  Health Check: http://localhost:${config.port}/api/v1/health`);
       console.log(`===============================================`);

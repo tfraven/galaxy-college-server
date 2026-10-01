@@ -11,7 +11,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 export const config = {
   port: parseInt(process.env.PORT || '5000', 10),
   jwtSecret: process.env.JWT_SECRET || 'college_runner_jwt_dev_secret_fallback',
-  dbFile: process.env.DATABASE_FILE || './data/college_runner.sqlite',
+  databaseUrl: process.env.DATABASE_URL || '',
   zoom: {
     sdkKey: process.env.ZOOM_SDK_KEY || '',
     sdkSecret: process.env.ZOOM_SDK_SECRET || '',

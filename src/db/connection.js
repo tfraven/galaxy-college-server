@@ -1,21 +1,12 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import { neon } from '@neondatabase/serverless';
 import { config } from '../config/index.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const dbPath = path.resolve(__dirname, '../../', config.dbFile);
-const dbDir = path.dirname(dbPath);
-
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+if (!config.databaseUrl) {
+  throw new Error('DATABASE_URL environment variable is not set. Please add your Neon connection string to server/.env');
 }
 
-export const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Tagged template literal SQL executor (Neon serverless HTTP transport)
+// Usage: await sql`SELECT * FROM users WHERE id = ${userId}`
+export const sql = neon(config.databaseUrl);
 
-export default db;
+export default sql;

@@ -1,70 +1,76 @@
-import { db } from './connection.js';
+import { sql } from './connection.js';
 
-export const initSchema = () => {
-  db.exec(`
+export const initSchema = async () => {
+  await sql`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       role INTEGER NOT NULL, -- 1: Admin, 2: Operator, 3: Teacher, 4: Student
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       full_name TEXT NOT NULL,
       phone TEXT,
-      is_active INTEGER DEFAULT 1,
-      must_change_pw INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
+      is_active BOOLEAN DEFAULT TRUE,
+      must_change_pw BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       level INTEGER NOT NULL, -- 1: 1st Year, 2: 2nd Year, 3: Entry
       grp INTEGER NOT NULL,   -- 1: Pre-Eng, 2: Pre-Med, 3: Comp Sci
       name TEXT NOT NULL,
-      is_active INTEGER DEFAULT 1,
+      is_active BOOLEAN DEFAULT TRUE,
       UNIQUE(level, grp)
-    );
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS sections (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      class_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id),
       name TEXT NOT NULL,
-      UNIQUE(class_id, name),
-      FOREIGN KEY(class_id) REFERENCES classes(id)
-    );
+      UNIQUE(class_id, name)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS subjects (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL
-    );
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS courses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      class_id INTEGER NOT NULL,
-      subject_id INTEGER NOT NULL,
-      UNIQUE(class_id, subject_id),
-      FOREIGN KEY(class_id) REFERENCES classes(id),
-      FOREIGN KEY(subject_id) REFERENCES subjects(id)
-    );
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id),
+      subject_id INTEGER NOT NULL REFERENCES subjects(id),
+      UNIQUE(class_id, subject_id)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS teacher_courses (
-      user_id INTEGER NOT NULL,
-      course_id INTEGER NOT NULL,
-      PRIMARY KEY(user_id, course_id),
-      FOREIGN KEY(user_id) REFERENCES users(id),
-      FOREIGN KEY(course_id) REFERENCES courses(id)
-    );
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      course_id INTEGER NOT NULL REFERENCES courses(id),
+      PRIMARY KEY(user_id, course_id)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS students (
-      user_id INTEGER PRIMARY KEY,
-      class_id INTEGER NOT NULL,
-      section_id INTEGER,
-      FOREIGN KEY(user_id) REFERENCES users(id),
-      FOREIGN KEY(class_id) REFERENCES classes(id),
-      FOREIGN KEY(section_id) REFERENCES sections(id)
-    );
+      user_id INTEGER PRIMARY KEY REFERENCES users(id),
+      class_id INTEGER NOT NULL REFERENCES classes(id),
+      section_id INTEGER REFERENCES sections(id)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS questions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      course_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      course_id INTEGER NOT NULL REFERENCES courses(id),
       topic TEXT,
       body TEXT NOT NULL,
       image TEXT,
@@ -74,95 +80,93 @@ export const initSchema = () => {
       opt_d TEXT NOT NULL,
       correct TEXT NOT NULL CHECK(correct IN ('A','B','C','D')),
       explanation TEXT,
-      is_active INTEGER DEFAULT 1,
-      created_by INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY(course_id) REFERENCES courses(id),
-      FOREIGN KEY(created_by) REFERENCES users(id)
-    );
+      is_active BOOLEAN DEFAULT TRUE,
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS tests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      course_id INTEGER NOT NULL,
-      section_id INTEGER,
+      id SERIAL PRIMARY KEY,
+      course_id INTEGER NOT NULL REFERENCES courses(id),
+      section_id INTEGER REFERENCES sections(id),
       title TEXT NOT NULL,
       duration_min INTEGER NOT NULL,
-      mark_per_q INTEGER DEFAULT 1,
-      neg_mark REAL DEFAULT 0,
-      shuffle_q INTEGER DEFAULT 1,
-      shuffle_opt INTEGER DEFAULT 1,
-      start_at TEXT NOT NULL,
-      end_at TEXT NOT NULL,
+      mark_per_q NUMERIC DEFAULT 1,
+      neg_mark NUMERIC DEFAULT 0,
+      shuffle_q BOOLEAN DEFAULT TRUE,
+      shuffle_opt BOOLEAN DEFAULT TRUE,
+      start_at TIMESTAMPTZ NOT NULL,
+      end_at TIMESTAMPTZ NOT NULL,
       result_mode INTEGER DEFAULT 1, -- 1: Immediate, 2: After close, 3: Manual
-      results_released INTEGER DEFAULT 1,
+      results_released BOOLEAN DEFAULT TRUE,
       status INTEGER DEFAULT 1, -- 1: Draft, 2: Published, 3: Closed
-      created_by INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY(course_id) REFERENCES courses(id),
-      FOREIGN KEY(section_id) REFERENCES sections(id),
-      FOREIGN KEY(created_by) REFERENCES users(id)
-    );
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS test_questions (
-      test_id INTEGER NOT NULL,
-      question_id INTEGER NOT NULL,
-      PRIMARY KEY(test_id, question_id),
-      FOREIGN KEY(test_id) REFERENCES tests(id),
-      FOREIGN KEY(question_id) REFERENCES questions(id)
-    );
+      test_id INTEGER NOT NULL REFERENCES tests(id),
+      question_id INTEGER NOT NULL REFERENCES questions(id),
+      PRIMARY KEY(test_id, question_id)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS attempts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      test_id INTEGER NOT NULL,
-      student_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      test_id INTEGER NOT NULL REFERENCES tests(id),
+      student_id INTEGER NOT NULL REFERENCES users(id),
       seed INTEGER NOT NULL,
-      started_at TEXT NOT NULL,
-      deadline_at TEXT NOT NULL,
-      submitted_at TEXT,
+      started_at TIMESTAMPTZ NOT NULL,
+      deadline_at TIMESTAMPTZ NOT NULL,
+      submitted_at TIMESTAMPTZ,
       correct_cnt INTEGER,
       wrong_cnt INTEGER,
-      score REAL,
-      UNIQUE(test_id, student_id),
-      FOREIGN KEY(test_id) REFERENCES tests(id),
-      FOREIGN KEY(student_id) REFERENCES users(id)
-    );
+      score NUMERIC,
+      UNIQUE(test_id, student_id)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS attempt_answers (
-      attempt_id INTEGER NOT NULL,
-      question_id INTEGER NOT NULL,
-      chosen TEXT CHECK(chosen IN ('A','B','C','D') OR chosen IS NULL),
-      PRIMARY KEY(attempt_id, question_id),
-      FOREIGN KEY(attempt_id) REFERENCES attempts(id),
-      FOREIGN KEY(question_id) REFERENCES questions(id)
-    );
+      attempt_id INTEGER NOT NULL REFERENCES attempts(id),
+      question_id INTEGER NOT NULL REFERENCES questions(id),
+      chosen TEXT CHECK(chosen IN ('A','B','C','D')),
+      PRIMARY KEY(attempt_id, question_id)
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS live_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      class_id INTEGER NOT NULL,
-      section_id INTEGER,
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id),
+      section_id INTEGER REFERENCES sections(id),
       course_name TEXT,
       title TEXT NOT NULL,
-      host_id INTEGER,
-      plan_start TEXT NOT NULL,
-      plan_end TEXT NOT NULL,
+      host_id INTEGER REFERENCES users(id),
+      plan_start TIMESTAMPTZ NOT NULL,
+      plan_end TIMESTAMPTZ NOT NULL,
       status INTEGER DEFAULT 1, -- 1: Scheduled, 2: Live, 3: Ended
-      started_at TEXT,
-      ended_at TEXT,
-      created_by INTEGER,
+      started_at TIMESTAMPTZ,
+      ended_at TIMESTAMPTZ,
+      created_by INTEGER REFERENCES users(id),
       zoom_session_id TEXT,
-      zoom_session_pwd TEXT,
-      FOREIGN KEY(class_id) REFERENCES classes(id),
-      FOREIGN KEY(section_id) REFERENCES sections(id),
-      FOREIGN KEY(host_id) REFERENCES users(id)
-    );
+      zoom_session_pwd TEXT
+    )
+  `;
 
+  await sql`
     CREATE TABLE IF NOT EXISTS session_joins (
-      session_id INTEGER NOT NULL,
-      student_id INTEGER NOT NULL,
-      first_join TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY(session_id, student_id),
-      FOREIGN KEY(session_id) REFERENCES live_sessions(id),
-      FOREIGN KEY(student_id) REFERENCES users(id)
-    );
-  `);
+      session_id INTEGER NOT NULL REFERENCES live_sessions(id),
+      student_id INTEGER NOT NULL REFERENCES users(id),
+      first_join TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(session_id, student_id)
+    )
+  `;
+
+  console.log('PostgreSQL schema initialized successfully.');
 };

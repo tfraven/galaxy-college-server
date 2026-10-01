@@ -1,53 +1,57 @@
 import express from 'express';
-import { db } from '../db/connection.js';
+import { sql } from '../db/connection.js';
 import { generateZoomSessionToken } from '../services/zoom.js';
 
 export const sessionsRouter = express.Router();
 
-sessionsRouter.get('/', (_req, res) => {
+const buildSessionDto = (s) => ({
+  id: s.id,
+  classId: s.class_id,
+  className: s.classname,
+  sectionId: s.section_id,
+  sectionName: s.sectionname || 'All Sections',
+  courseName: s.course_name,
+  title: s.title,
+  hostId: s.host_id,
+  hostName: s.hostname || 'Faculty Instructor',
+  planStart: s.plan_start,
+  planEnd: s.plan_end,
+  status: s.status,
+  startedAt: s.started_at,
+  endedAt: s.ended_at,
+  zoomSessionId: s.zoom_session_id,
+  participantCount: parseInt(s.participant_count) || 0,
+});
+
+sessionsRouter.get('/', async (_req, res) => {
   try {
-    const sessions = db.prepare(`
-      SELECT 
-        s.id,
-        s.class_id as classId,
+    const sessions = await sql`
+      SELECT
+        s.id, s.class_id, s.section_id, s.course_name, s.title,
+        s.host_id, s.plan_start, s.plan_end, s.status,
+        s.started_at, s.ended_at, s.zoom_session_id,
         c.name as className,
-        s.section_id as sectionId,
         sec.name as sectionName,
-        s.course_name as courseName,
-        s.title,
-        s.host_id as hostId,
         u.full_name as hostName,
-        s.plan_start as planStart,
-        s.plan_end as planEnd,
-        s.status,
-        s.started_at as startedAt,
-        s.ended_at as endedAt,
-        s.zoom_session_id as zoomSessionId,
-        (SELECT COUNT(*) FROM session_joins WHERE session_id = s.id) as participantCount
+        (SELECT COUNT(*)::int FROM session_joins WHERE session_id = s.id) as participant_count
       FROM live_sessions s
       JOIN classes c ON s.class_id = c.id
       LEFT JOIN sections sec ON s.section_id = sec.id
       LEFT JOIN users u ON s.host_id = u.id
       ORDER BY s.status ASC, s.plan_start ASC
-    `).all();
+    `;
 
-    return res.json({ success: true, data: sessions });
+    return res.json({ success: true, data: sessions.map(buildSessionDto) });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-sessionsRouter.post('/', (req, res) => {
+sessionsRouter.post('/', async (req, res) => {
   try {
     const {
-      classId,
-      sectionId,
-      courseName,
-      title,
-      hostId,
-      planStart,
-      planEnd,
-      status = 1,
+      classId, sectionId, courseName, title, hostId,
+      planStart, planEnd, status = 1,
     } = req.body;
 
     if (!classId || !title) {
@@ -59,39 +63,31 @@ sessionsRouter.post('/', (req, res) => {
     const finalEnd = planEnd || new Date(now.getTime() + 90 * 60 * 1000).toISOString();
     const zoomSessionId = `zoom_session_${Date.now()}`;
 
-    const result = db.prepare(`
-      INSERT INTO live_sessions (
-        class_id, section_id, course_name, title, host_id,
-        plan_start, plan_end, status, zoom_session_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      classId,
-      sectionId || null,
-      courseName || 'General',
-      title.trim(),
-      hostId || null,
-      finalStart,
-      finalEnd,
-      status,
-      zoomSessionId
-    );
+    const [newSession] = await sql`
+      INSERT INTO live_sessions (class_id, section_id, course_name, title, host_id, plan_start, plan_end, status, zoom_session_id)
+      VALUES (${classId}, ${sectionId || null}, ${courseName || 'General'}, ${title.trim()}, ${hostId || null}, ${finalStart}, ${finalEnd}, ${status}, ${zoomSessionId})
+      RETURNING id
+    `;
 
-    const sessionId = result.lastInsertRowid;
-    const cls = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId);
-    const host = hostId ? db.prepare('SELECT full_name FROM users WHERE id = ?').get(hostId) : null;
+    const sessionId = newSession.id;
+    const clsRows = await sql`SELECT name FROM classes WHERE id = ${classId}`;
+    let hostRows = [];
+    if (hostId) {
+      hostRows = await sql`SELECT full_name FROM users WHERE id = ${hostId}`;
+    }
 
     return res.status(201).json({
       success: true,
       data: {
         id: sessionId,
         classId,
-        className: cls ? cls.name : '',
+        className: clsRows[0]?.name || '',
         sectionId: sectionId || null,
         sectionName: 'All Sections',
         courseName: courseName || 'General',
         title: title.trim(),
         hostId,
-        hostName: host ? host.full_name : 'Faculty Instructor',
+        hostName: hostRows[0]?.full_name || 'Faculty Instructor',
         planStart: finalStart,
         planEnd: finalEnd,
         status,
@@ -104,7 +100,7 @@ sessionsRouter.post('/', (req, res) => {
   }
 });
 
-sessionsRouter.patch('/:id/status', (req, res) => {
+sessionsRouter.patch('/:id/status', async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
     const { status } = req.body;
@@ -114,49 +110,43 @@ sessionsRouter.patch('/:id/status', (req, res) => {
 
     const now = new Date().toISOString();
     if (status === 2) {
-      db.prepare('UPDATE live_sessions SET status = ?, started_at = ? WHERE id = ?').run(status, now, sessionId);
+      await sql`UPDATE live_sessions SET status = ${status}, started_at = ${now} WHERE id = ${sessionId}`;
     } else if (status === 3) {
-      db.prepare('UPDATE live_sessions SET status = ?, ended_at = ? WHERE id = ?').run(status, now, sessionId);
+      await sql`UPDATE live_sessions SET status = ${status}, ended_at = ${now} WHERE id = ${sessionId}`;
     } else {
-      db.prepare('UPDATE live_sessions SET status = ? WHERE id = ?').run(status, sessionId);
+      await sql`UPDATE live_sessions SET status = ${status} WHERE id = ${sessionId}`;
     }
 
-    const session = db.prepare(`
-      SELECT 
-        s.id,
-        s.class_id as classId,
+    const sessions = await sql`
+      SELECT
+        s.id, s.class_id, s.section_id, s.course_name, s.title,
+        s.host_id, s.plan_start, s.plan_end, s.status,
+        s.started_at, s.ended_at, s.zoom_session_id,
         c.name as className,
-        s.section_id as sectionId,
-        s.course_name as courseName,
-        s.title,
-        s.host_id as hostId,
+        sec.name as sectionName,
         u.full_name as hostName,
-        s.plan_start as planStart,
-        s.plan_end as planEnd,
-        s.status,
-        s.started_at as startedAt,
-        s.ended_at as endedAt,
-        s.zoom_session_id as zoomSessionId,
-        (SELECT COUNT(*) FROM session_joins WHERE session_id = s.id) as participantCount
+        (SELECT COUNT(*)::int FROM session_joins WHERE session_id = s.id) as participant_count
       FROM live_sessions s
       JOIN classes c ON s.class_id = c.id
+      LEFT JOIN sections sec ON s.section_id = sec.id
       LEFT JOIN users u ON s.host_id = u.id
-      WHERE s.id = ?
-    `).get(sessionId);
+      WHERE s.id = ${sessionId}
+    `;
 
-    return res.json({ success: true, data: session });
+    return res.json({ success: true, data: buildSessionDto(sessions[0]) });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // LIV-4: Issue Zoom Video SDK JWT token and record join
-sessionsRouter.post('/:id/join-token', (req, res) => {
+sessionsRouter.post('/:id/join-token', async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
     const { studentId } = req.body;
 
-    const session = db.prepare('SELECT * FROM live_sessions WHERE id = ?').get(sessionId);
+    const sessionRows = await sql`SELECT * FROM live_sessions WHERE id = ${sessionId}`;
+    const session = sessionRows[0];
     if (!session) {
       return res.status(404).json({ success: false, error: 'Session not found' });
     }
@@ -168,7 +158,8 @@ sessionsRouter.post('/:id/join-token', (req, res) => {
     let user = null;
     let isHost = false;
     if (studentId) {
-      user = db.prepare('SELECT id, role, full_name, username FROM users WHERE id = ?').get(studentId);
+      const userRows = await sql`SELECT id, role, full_name, username FROM users WHERE id = ${studentId}`;
+      user = userRows[0];
       if (user && (user.role === 1 || user.role === 2 || user.id === session.host_id)) {
         isHost = true;
       }
@@ -176,20 +167,19 @@ sessionsRouter.post('/:id/join-token', (req, res) => {
 
     // Record attendance / join event
     if (studentId) {
-      try {
-        db.prepare('INSERT OR IGNORE INTO session_joins (session_id, student_id) VALUES (?, ?)').run(sessionId, studentId);
-      } catch (e) {
-        // Ignore duplicate joins
-      }
+      await sql`
+        INSERT INTO session_joins (session_id, student_id)
+        VALUES (${sessionId}, ${studentId})
+        ON CONFLICT (session_id, student_id) DO NOTHING
+      `;
     }
 
     const sessionName = `class_room_${session.id}_${session.zoom_session_id || 'stream'}`;
     const displayName = user ? user.full_name : `Student_${studentId || 'Guest'}`;
 
-    // Generate Zoom Video SDK JWT token with audio and camera allowed for students
     const zoomTokenData = generateZoomSessionToken({
       sessionName,
-      roleType: isHost ? 1 : 0, // 1: Host/Teacher, 0: Student Participant
+      roleType: isHost ? 1 : 0,
       userIdentity: displayName,
       sessionKey: session.zoom_session_pwd || '',
     });
@@ -201,8 +191,8 @@ sessionsRouter.post('/:id/join-token', (req, res) => {
         roomName: sessionName,
         sessionTitle: session.title,
         zoomSessionId: session.zoom_session_id,
-        canTalk: true,       // Audio unmute allowed
-        canShareVideo: true, // Camera allowed
+        canTalk: true,
+        canShareVideo: true,
         role: zoomTokenData.userRole,
         expiresAt: zoomTokenData.expiresAt,
         isConfigured: zoomTokenData.isRealZoomCredentialsConfigured,
