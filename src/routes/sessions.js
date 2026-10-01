@@ -233,6 +233,7 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
         zoomUrl: resolvedMeeting.zoomUrl,
         zoomAppUrl: resolvedMeeting.zoomAppUrl,
         webClientUrl: resolvedMeeting.webClientUrl,
+        hasValidMeeting: resolvedMeeting.hasValidMeeting,
         canTalk: true,
         canShareVideo: true,
         role: zoomTokenData.userRole,
@@ -240,6 +241,49 @@ sessionsRouter.post('/:id/join-token', async (req, res) => {
         userName: displayName,
         expiresAt: zoomTokenData.expiresAt,
         isConfigured: zoomTokenData.isRealZoomCredentialsConfigured,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// LIV-4B: Update Zoom meeting link for a session
+sessionsRouter.patch('/:id/zoom-link', async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id, 10);
+    const { zoomJoinUrl } = req.body;
+    if (!zoomJoinUrl || !zoomJoinUrl.trim()) {
+      return res.status(400).json({ success: false, error: 'Zoom meeting link is required' });
+    }
+
+    const resolved = resolveZoomMeetingDetails({
+      sessionId,
+      customUrl: zoomJoinUrl.trim(),
+    });
+
+    if (!resolved.hasValidMeeting) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please enter a valid Zoom meeting link (e.g., https://zoom.us/j/1234567890?pwd=... or a 9-11 digit Meeting ID).',
+      });
+    }
+
+    await sql`
+      UPDATE live_sessions
+      SET zoom_join_url = ${zoomJoinUrl.trim()},
+          zoom_meeting_id = ${resolved.meetingId},
+          zoom_passcode = ${resolved.passcode}
+      WHERE id = ${sessionId}
+    `;
+
+    return res.json({
+      success: true,
+      data: {
+        sessionId,
+        zoomJoinUrl: zoomJoinUrl.trim(),
+        meetingId: resolved.meetingId,
+        passcode: resolved.passcode,
       },
     });
   } catch (error) {
