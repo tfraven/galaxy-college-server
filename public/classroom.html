@@ -1,144 +1,229 @@
 ﻿<!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Live Classroom</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #090d16; font-family: system-ui, sans-serif; color: #e2e8f0; }
-    #zoom-root { width: 100%; height: 100%; }
-    #status-overlay {
-      position: fixed; inset: 0;
-      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
-      background: #090d16; transition: opacity 0.4s ease; z-index: 9999;
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
-    #status-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #090d16;
+      font-family: system-ui, sans-serif;
+      color: #e2e8f0;
+    }
+
+    #session {
+      width: 100%;
+      height: 100%;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 32px;
+      text-align: center;
+      background: #090d16;
+      z-index: 9999;
+      transition: opacity .3s;
+    }
+
+    .overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
     .spinner {
-      width: 40px; height: 40px;
-      border: 3px solid rgba(99, 102, 241, 0.2); border-top-color: #6366f1;
-      border-radius: 50%; animation: spin 0.8s linear infinite;
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(99, 102, 241, .2);
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    #status-msg { font-size: 14px; color: #94a3b8; letter-spacing: 0.02em; }
-    #error-card {
-      position: fixed; inset: 0; display: none; flex-direction: column;
-      align-items: center; justify-content: center; gap: 12px;
-      padding: 32px; background: #090d16; text-align: center;
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
     }
-    #error-card.visible { display: flex; }
-    #error-msg { font-size: 14px; color: #f87171; max-width: 320px; line-height: 1.5; }
-    #retry-btn {
-      margin-top: 8px; padding: 10px 24px; background: #6366f1;
-      color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;
+
+    #status-msg {
+      font-size: 14px;
+      color: #94a3b8;
     }
-    #retry-btn:hover { background: #4f46e5; }
-    /* Zoom renders into a <canvas> / shadow DOM — make it fill the container */
-    #zoom-root > * { width: 100% !important; height: 100% !important; }
+
+    #error-msg {
+      font-size: 14px;
+      color: #f87171;
+      max-width: 340px;
+      line-height: 1.5;
+    }
+
+    button {
+      margin-top: 6px;
+      padding: 10px 24px;
+      background: #6366f1;
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
   </style>
 </head>
-<body>
-  <div id="zoom-root"></div>
 
-  <div id="status-overlay">
+<body>
+  <div id="session"></div>
+
+  <div id="loading" class="overlay">
     <div class="spinner"></div>
     <p id="status-msg">Connecting to classroom...</p>
   </div>
-
-  <div id="error-card">
+  <div id="error" class="overlay hidden">
     <p style="font-size:32px">📡</p>
-    <p id="error-msg">Could not connect to the classroom.</p>
-    <button id="retry-btn" onclick="location.reload()">Try again</button>
+    <p id="error-msg"></p><button onclick="location.reload()">Try again</button>
   </div>
 
-  <!-- Local UMD build — same-origin, no CDN or CORS issues -->
-  <script src="/zoom/index.umd.js"></script>
   <script>
-    /* ── Helpers ── */
-    function postToParent(type, extra) {
+    /*
+     * Zoom Video SDK UI Toolkit (prebuilt UI: video grid, speaker view, screen share, chat, participants, settings).
+     * The previous page used the low-level SDK but never rendered other people's video, so students saw nothing.
+     * Pin the version; check https://www.npmjs.com/package/@zoom/videosdk-ui-toolkit for newer releases.
+     */
+    var UIKIT_VERSION = '2.4.5-1';
+    var UIKIT_BASE = 'https://source.zoom.us/uitoolkit/' + UIKIT_VERSION + '/';
+
+    /* URL hash contract (set by the app):  #t=<zoomJwt>&s=<sessionName>&n=<userName>&h=<1|0>&i=<sessionId>&a=<appJwt> */
+    function parseHash() {
+      var out = {};
+      window.location.hash.slice(1).split('&').forEach(function (pair) {
+        var i = pair.indexOf('=');
+        if (i > -1) out[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1));
+      });
+      return out;
+    }
+    function post(type, extra) {
       var payload = JSON.stringify(Object.assign({ type: type }, extra || {}));
-      try { if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage(payload); return; } } catch (_) {}
+      try { if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage(payload); return; } } catch (e) { }
       if (window.parent !== window) window.parent.postMessage(payload, '*');
     }
-    function setStatus(msg) { document.getElementById('status-msg').textContent = msg; }
+    function hide(id) { document.getElementById(id).classList.add('hidden'); }
+    function show(id) { document.getElementById(id).classList.remove('hidden'); }
+    function setStatus(m) { document.getElementById('status-msg').textContent = m; }
     function showError(msg) {
-      document.getElementById('status-overlay').classList.add('hidden');
+      hide('loading');
       document.getElementById('error-msg').textContent = msg;
-      document.getElementById('error-card').classList.add('visible');
-      postToParent('error', { message: msg });
+      show('error');
+      post('error', { message: msg });
     }
-    function parseHash() {
-      var hash = window.location.hash.slice(1);
-      var params = {};
-      hash.split('&').forEach(function(pair) {
-        var idx = pair.indexOf('=');
-        if (idx > -1) params[pair.slice(0, idx)] = decodeURIComponent(pair.slice(idx + 1));
+    function loadCss(href) {
+      var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l);
+    }
+    function loadScript(src) {
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src; s.onload = resolve;
+        s.onerror = function () { reject(new Error('sdk-load')); };
+        document.head.appendChild(s);
       });
-      return params;
+    }
+    function friendly(err) {
+      var r = String((err && (err.reason || err.message || err.errorMessage)) || err || '');
+      if (/sdk-load/.test(r)) return 'Could not load the Zoom classroom (version ' + UIKIT_VERSION + '). Check your connection and try again.';
+      if (/token|signature|jwt|expired/i.test(r)) return 'Your class pass has expired or is invalid. Go back and join again.';
+      if (/network|timeout/i.test(r)) return 'Network error. Check your connection and try again.';
+      if (/kick|remove/i.test(r)) return 'You were removed from the class.';
+      if (/permission|denied|notallowed/i.test(r)) return 'Camera/microphone permission was blocked. Allow access and try again.';
+      return 'Could not join the class. Please try again.';
     }
 
-    /* ── Main ── */
-    (async function () {
+    (async function main() {
       var p = parseHash();
-      var token = p.t, sessionName = p.s, userName = p.n;
+      // Keep the Zoom token out of browser history / screenshots of the URL bar.
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { }
 
-      if (!token || !sessionName || !userName) {
-        showError('Missing session parameters. Please go back and try again.');
-        return;
-      }
+      if (!p.t || !p.s || !p.n) return showError('Missing session details. Please go back and join again.');
+      var isHost = p.h === '1';
 
-      /* ZoomVideo is exposed as a global by the UMD build */
-      var ZoomVideo = window.ZoomVideo;
-      if (!ZoomVideo) {
-        showError('Zoom SDK failed to load. Please refresh the page.');
-        return;
-      }
-
-      var client;
       try {
-        setStatus('Initialising...');
-        client = ZoomVideo.createClient();
+        setStatus('Loading classroom...');
+        loadCss(UIKIT_BASE + 'videosdk-ui-toolkit.css');
+        await loadScript(UIKIT_BASE + 'videosdk-ui-toolkit.min.umd.js');
+        var uitoolkit = window.UIToolkit;
+        if (!uitoolkit) throw new Error('sdk-load');
 
-        /* Tell the SDK where to find its worker / wasm assets (same-origin) */
-        await client.init('en-US', 'Global', {
-          enforceMultipleVideos: false,
-          patchJsMedia: true,
-          stayAwake: true,
-          dependentAssets: '/zoom/lib/',
-        });
+        var container = document.getElementById('session');
+        var closedSent = false;
+        function onClosed() {
+          if (closedSent) return;
+          closedSent = true;
+          clearInterval(poller);
+          try { uitoolkit.closeSession(container); } catch (e) { }
+          post('closed', { isHost: isHost });
+          hide('loading');
+          document.getElementById('error-msg').textContent = 'The class has ended.';
+          show('error');
+          document.querySelector('#error button').style.display = 'none';
+        }
+
+        var config = {
+          videoSDKJWT: p.t,
+          sessionName: p.s,
+          userName: p.n,
+          featuresOptions: {
+            // Teachers get a device-check preview before going live; students join straight in with mic/camera off.
+            preview: { enable: isHost },
+            video: { enable: true },
+            audio: { enable: true },
+            share: { enable: true },
+            chat: { enable: true },
+            users: { enable: true },
+            settings: { enable: true },
+            leave: { enable: true },
+          },
+        };
 
         setStatus('Joining class...');
-        await client.join(sessionName, token, userName);
+        await uitoolkit.joinSession(container, config);
+        hide('loading');
 
-        /* ── Success ── */
-        document.getElementById('status-overlay').classList.add('hidden');
-        postToParent('joined');
+        uitoolkit.onSessionJoined(function () { post('joined', { isHost: isHost }); });
+        uitoolkit.onSessionClosed(onClosed);
+        post('joined', { isHost: isHost });
 
-        var stream = client.getMediaStream();
-        try { await stream.startAudio(); } catch (_) { /* microphone denied — audio-only still works */ }
-        try {
-          var videoEl = document.createElement('video');
-          videoEl.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-          document.getElementById('zoom-root').appendChild(videoEl);
-          await stream.startVideo({ videoElement: videoEl });
-        } catch (_) { /* camera denied */ }
-
-        /* ── Listen for session end / kick ── */
-        client.on('connection-change', function (payload) {
-          if (payload.state === 'Closed' || payload.state === 'Fail') postToParent('closed');
-        });
-        client.on('session-end-request', function () { postToParent('closed'); });
-
+        /* LIV-7: when staff end the class in the app, drop everyone still connected. */
+        var poller = null;
+        if (p.i && p.a) {
+          poller = setInterval(function () {
+            fetch('/api/v1/sessions/' + encodeURIComponent(p.i) + '/live-status', { headers: { Authorization: 'Bearer ' + p.a } })
+              .then(function (r) { return r.json(); })
+              .then(function (j) { if (j && j.success && j.data.status === 3) onClosed(); })
+              .catch(function () { /* transient network error: try again next tick */ });
+          }, 10000);
+        }
       } catch (err) {
         console.error('[Classroom]', err);
-        var reason = (err && (err.reason || err.message)) || String(err);
-        var msg = 'Could not join the class. Please try again.';
-        if (/token/i.test(reason))   msg = 'Session token has expired. Go back and rejoin.';
-        if (/network/i.test(reason)) msg = 'Network error. Check your connection.';
-        if (/leave|kick/i.test(reason)) msg = 'You were removed from the session.';
-        showError(msg);
+        showError(friendly(err));
       }
     })();
   </script>
 </body>
+
 </html>

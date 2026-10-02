@@ -1,9 +1,11 @@
 import express from 'express';
 import { sql } from '../db/connection.js';
+import { asyncHandler, fail, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
+import { canManageCourse, getStudentEnrolment } from '../services/access.js';
 
 export const testsRouter = express.Router();
 
-const buildTestDto = (t, questionIds) => ({
+const toDto = (t) => ({
   id: t.id,
   courseId: t.course_id,
   courseName: `${t.subjectname} (${t.classname})`,
@@ -20,222 +22,168 @@ const buildTestDto = (t, questionIds) => ({
   resultMode: t.result_mode,
   resultsReleased: t.results_released,
   status: t.status,
-  questionIds,
+  questionIds: (t.question_ids || []).map(Number),
   createdBy: t.created_by,
   createdAt: t.created_at,
 });
 
-testsRouter.get('/', async (_req, res) => {
-  try {
-    const rawTests = await sql`
-      SELECT
-        t.id, t.course_id, t.section_id, t.title,
-        t.duration_min, t.mark_per_q, t.neg_mark,
-        t.shuffle_q, t.shuffle_opt,
-        t.start_at, t.end_at,
-        t.result_mode, t.results_released, t.status,
-        t.created_by, t.created_at,
-        s.name as subjectName,
-        cl.name as className,
-        sec.name as sectionName
-      FROM tests t
-      JOIN courses c ON t.course_id = c.id
-      JOIN subjects s ON c.subject_id = s.id
-      JOIN classes cl ON c.class_id = cl.id
-      LEFT JOIN sections sec ON t.section_id = sec.id
-      ORDER BY t.id DESC
-    `;
+// One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
+const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null } = {}) => sql`
+  SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark,
+         t.shuffle_q, t.shuffle_opt, t.start_at, t.end_at, t.result_mode, t.results_released, t.status,
+         t.created_by, t.created_at,
+         s.name AS subjectname, cl.name AS classname, sec.name AS sectionname,
+         COALESCE((SELECT array_agg(tq.question_id ORDER BY tq.question_id) FROM test_questions tq WHERE tq.test_id = t.id), '{}') AS question_ids
+  FROM tests t
+  JOIN courses c ON t.course_id = c.id
+  JOIN subjects s ON c.subject_id = s.id
+  JOIN classes cl ON c.class_id = cl.id
+  LEFT JOIN sections sec ON t.section_id = sec.id
+  WHERE (${testId}::int IS NULL OR t.id = ${testId}::int)
+    AND (${teacherId}::int IS NULL OR EXISTS (
+          SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
+    AND (${classId}::int IS NULL OR (
+          t.status = 2 AND c.class_id = ${classId}::int
+          AND (t.section_id IS NULL OR t.section_id = ${sectionId}::int)))
+  ORDER BY t.id DESC
+`;
 
-    const tests = await Promise.all(
-      rawTests.map(async (t) => {
-        const qRows = await sql`
-          SELECT question_id FROM test_questions WHERE test_id = ${t.id} ORDER BY question_id ASC
-        `;
-        return buildTestDto(t, qRows.map((q) => q.question_id));
-      })
-    );
-
-    return res.json({ success: true, data: tests });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+// EXM-1 / TST-6: students see only Published tests of their own class/section; staff see their scope.
+testsRouter.get('/', asyncHandler(async (req, res) => {
+  let rows;
+  if (req.user.role === ROLE.STUDENT) {
+    const enrol = await getStudentEnrolment(req.user.id);
+    if (!enrol) return res.json({ success: true, data: [] });
+    rows = await fetchTests({ classId: enrol.class_id, sectionId: enrol.section_id });
+  } else {
+    rows = await fetchTests({ teacherId: req.user.role === ROLE.TEACHER ? req.user.id : null });
   }
-});
+  res.json({ success: true, data: rows.map(toDto) });
+}));
 
-testsRouter.get('/:id', async (req, res) => {
-  try {
-    const testId = parseInt(req.params.id, 10);
-    const rows = await sql`
-      SELECT
-        t.id, t.course_id, t.section_id, t.title,
-        t.duration_min, t.mark_per_q, t.neg_mark,
-        t.shuffle_q, t.shuffle_opt,
-        t.start_at, t.end_at,
-        t.result_mode, t.results_released, t.status,
-        t.created_by, t.created_at,
-        s.name as subjectName,
-        cl.name as className
-      FROM tests t
-      JOIN courses c ON t.course_id = c.id
-      JOIN subjects s ON c.subject_id = s.id
-      JOIN classes cl ON c.class_id = cl.id
-      WHERE t.id = ${testId}
-    `;
+// Includes correct answers, so staff only.
+testsRouter.get('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [row] = await fetchTests({ testId: id });
+  if (!row) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, row.course_id))) return fail(res, 403, 'Not your course.');
 
-    if (!rows.length) {
-      return res.status(404).json({ success: false, error: 'Test not found' });
-    }
+  const questions = await sql`
+    SELECT q.id, q.course_id AS "courseId", q.topic, q.body, q.image,
+           q.opt_a AS "optA", q.opt_b AS "optB", q.opt_c AS "optC", q.opt_d AS "optD",
+           q.correct, q.explanation, q.is_active AS "isActive"
+    FROM questions q JOIN test_questions tq ON q.id = tq.question_id
+    WHERE tq.test_id = ${id} ORDER BY q.id ASC
+  `;
+  res.json({ success: true, data: { test: toDto(row), questions } });
+}));
 
-    const testRow = rows[0];
-    const questions = await sql`
-      SELECT
-        q.id, q.course_id as "courseId", q.topic, q.body, q.image,
-        q.opt_a as "optA", q.opt_b as "optB", q.opt_c as "optC", q.opt_d as "optD",
-        q.correct, q.explanation, q.is_active as "isActive"
-      FROM questions q
-      JOIN test_questions tq ON q.id = tq.question_id
-      WHERE tq.test_id = ${testId}
-      ORDER BY q.id ASC
-    `;
+testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const {
+    courseId, sectionId, title, durationMin = 15, markPerQ = 1, negMark = 0,
+    shuffleQ = true, shuffleOpt = true, startAt, endAt, resultMode = 1, status = 1,
+  } = req.body || {};
+  const questionIds = Array.isArray(req.body?.questionIds) ? [...new Set(req.body.questionIds.map(toInt))].filter((n) => n !== null) : [];
 
-    const testDto = buildTestDto(testRow, questions.map((q) => q.id));
-    return res.json({ success: true, data: { test: testDto, questions } });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+  if (!courseId || !title?.trim() || !questionIds.length) {
+    return fail(res, 400, 'Course, title, and at least 1 question are required');
   }
-});
+  if (!(durationMin > 0) || !(markPerQ > 0) || negMark < 0) return fail(res, 400, 'Invalid duration or marks');
+  if (![1, 2, 3].includes(resultMode) || ![1, 2, 3].includes(status)) return fail(res, 400, 'Invalid result mode or status');
+  if (!(await canManageCourse(req.user, courseId))) return fail(res, 403, 'You are not assigned to this course.');
 
-testsRouter.post('/', async (req, res) => {
-  try {
-    const {
-      courseId, sectionId, title,
-      durationMin = 15, markPerQ = 1, negMark = 0,
-      shuffleQ = true, shuffleOpt = true,
-      startAt, endAt,
-      resultMode = 1, resultsReleased = true,
-      status = 1, questionIds = [], createdBy = 1,
-    } = req.body;
+  const now = new Date();
+  const start = startAt ? new Date(startAt) : now;
+  const end = endAt ? new Date(endAt) : new Date(now.getTime() + 7 * 864e5);
+  if (isNaN(start) || isNaN(end) || end <= start) return fail(res, 400, 'End time must be after start time');
 
-    if (!courseId || !title || !questionIds.length) {
-      return res.status(400).json({ success: false, error: 'Course, title, and at least 1 question are required' });
-    }
-
-    const now = new Date();
-    const finalStart = startAt || now.toISOString();
-    const finalEnd = endAt || new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    const [newTest] = await sql`
-      INSERT INTO tests (
-        course_id, section_id, title, duration_min, mark_per_q, neg_mark,
-        shuffle_q, shuffle_opt, start_at, end_at, result_mode, results_released,
-        status, created_by
-      ) VALUES (
-        ${courseId}, ${sectionId || null}, ${title.trim()}, ${durationMin},
-        ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
-        ${finalStart}, ${finalEnd}, ${resultMode}, ${resultsReleased}, ${status}, ${createdBy}
-      )
-      RETURNING id, created_at
+  if (sectionId) {
+    const [sec] = await sql`
+      SELECT 1 FROM sections s JOIN courses c ON c.class_id = s.class_id WHERE s.id = ${sectionId} AND c.id = ${courseId}
     `;
-
-    const testId = newTest.id;
-    for (const qid of questionIds) {
-      await sql`INSERT INTO test_questions (test_id, question_id) VALUES (${testId}, ${qid})`;
-    }
-
-    const crsRows = await sql`
-      SELECT s.name as "subjectName", cl.name as "className"
-      FROM courses c
-      JOIN subjects s ON c.subject_id = s.id
-      JOIN classes cl ON c.class_id = cl.id
-      WHERE c.id = ${courseId}
-    `;
-    const crs = crsRows[0];
-
-    return res.status(201).json({
-      success: true,
-      data: {
-        id: testId,
-        courseId,
-        courseName: crs ? `${crs.subjectName} (${crs.className})` : 'Course Test',
-        sectionId: sectionId || null,
-        sectionName: 'All Sections',
-        title: title.trim(),
-        durationMin,
-        markPerQ,
-        negMark,
-        shuffleQ,
-        shuffleOpt,
-        startAt: finalStart,
-        endAt: finalEnd,
-        resultMode,
-        resultsReleased,
-        status,
-        questionIds,
-        createdBy,
-        createdAt: newTest.created_at,
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    if (!sec) return fail(res, 400, 'Section does not belong to this course\'s class');
   }
-});
 
-testsRouter.patch('/:id/status', async (req, res) => {
-  try {
-    const testId = parseInt(req.params.id, 10);
-    const { status } = req.body;
-    if (status === undefined) {
-      return res.status(400).json({ success: false, error: 'Status is required' });
-    }
+  // Every question must be active and belong to this course.
+  const [{ n }] = await sql`
+    SELECT COUNT(*)::int AS n FROM questions WHERE id = ANY(${questionIds}::int[]) AND course_id = ${courseId} AND is_active`;
+  if (n !== questionIds.length) return fail(res, 400, 'Some questions are inactive or belong to another course');
 
-    await sql`UPDATE tests SET status = ${status} WHERE id = ${testId}`;
+  // Test + its questions in one atomic statement (before: N separate inserts, half-created tests on failure).
+  const [{ id }] = await sql`
+    WITH t AS (
+      INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
+                         start_at, end_at, result_mode, results_released, status, created_by)
+      VALUES (${courseId}, ${sectionId || null}, ${title.trim()}, ${durationMin}, ${markPerQ}, ${negMark},
+              ${shuffleQ}, ${shuffleOpt}, ${start.toISOString()}, ${end.toISOString()}, ${resultMode},
+              ${resultMode !== 3}, ${status}, ${req.user.id})
+      RETURNING id
+    ), tq AS (
+      INSERT INTO test_questions (test_id, question_id)
+      SELECT t.id, q FROM t, unnest(${questionIds}::int[]) AS q
+    )
+    SELECT id FROM t
+  `;
 
-    const rows = await sql`SELECT * FROM tests WHERE id = ${testId}`;
-    if (!rows.length) return res.status(404).json({ success: false, error: 'Test not found' });
+  const [row] = await fetchTests({ testId: id });
+  res.status(201).json({ success: true, data: toDto(row) });
+}));
 
-    const qRows = await sql`SELECT question_id FROM test_questions WHERE test_id = ${testId}`;
+const TRANSITIONS = { 1: [2], 2: [3] }; // Draft -> Published -> Closed (TST-6)
 
-    return res.json({
-      success: true,
-      data: { ...rows[0], status, questionIds: qRows.map((q) => q.question_id) },
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+testsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const status = toInt(req.body?.status);
+  if (![1, 2, 3].includes(status)) return fail(res, 400, 'Status must be 1 (Draft), 2 (Published) or 3 (Closed)');
+
+  const [row] = await fetchTests({ testId: id });
+  if (!row) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, row.course_id))) return fail(res, 403, 'Not your course.');
+  if (status !== row.status && !TRANSITIONS[row.status]?.includes(status)) {
+    return fail(res, 400, 'Allowed flow is Draft -> Published -> Closed.');
   }
-});
 
-// TST-10: Generate Question Paper & Answer Key
-testsRouter.get('/:id/document', async (req, res) => {
-  try {
-    const testId = parseInt(req.params.id, 10);
-    const testRows = await sql`SELECT * FROM tests WHERE id = ${testId}`;
-    if (!testRows.length) return res.status(404).json({ success: false, error: 'Test not found' });
-    const test = testRows[0];
+  await sql`UPDATE tests SET status = ${status} WHERE id = ${id}`;
+  const [updated] = await fetchTests({ testId: id });
+  res.json({ success: true, data: toDto(updated) });
+}));
 
-    const questions = await sql`
-      SELECT q.id, q.body, q.topic, q.correct, q.opt_a, q.opt_b, q.opt_c, q.opt_d
-      FROM questions q
-      JOIN test_questions tq ON q.id = tq.question_id
-      WHERE tq.test_id = ${testId}
-      ORDER BY q.id ASC
-    `;
+// RES-3 (manual release mode)
+testsRouter.patch('/:id/release', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const released = req.body?.released !== false;
+  const [row] = await fetchTests({ testId: id });
+  if (!row) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, row.course_id))) return fail(res, 403, 'Not your course.');
+  await sql`UPDATE tests SET results_released = ${released} WHERE id = ${id}`;
+  res.json({ success: true, data: { id, resultsReleased: released } });
+}));
 
-    const answerKey = questions.map((q, idx) => ({
-      qNum: idx + 1,
-      correct: q.correct,
-      topic: q.topic,
-    }));
+// TST-10: data for the printable Question Paper + Answer Key (PDF is rendered client-side/on demand).
+testsRouter.get('/:id/document', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [test] = await sql`SELECT * FROM tests WHERE id = ${id}`;
+  if (!test) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
 
-    return res.json({
-      success: true,
-      data: {
-        paperTitle: `${test.title} (Question Paper)`,
-        totalQuestions: questions.length,
-        totalMarks: questions.length * (parseFloat(test.mark_per_q) || 1),
-        formattedPaper: `Generated printable test sheet with ${questions.length} questions. Ready for PDF download.`,
-        answerKey,
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
-  }
-});
+  const questions = await sql`
+    SELECT q.id, q.body, q.topic, q.image, q.correct, q.opt_a, q.opt_b, q.opt_c, q.opt_d
+    FROM questions q JOIN test_questions tq ON q.id = tq.question_id
+    WHERE tq.test_id = ${id} ORDER BY q.id ASC
+  `;
+
+  res.json({
+    success: true,
+    data: {
+      paperTitle: `${test.title} (Question Paper)`,
+      totalQuestions: questions.length,
+      totalMarks: questions.length * (parseFloat(test.mark_per_q) || 1),
+      formattedPaper: `Printable test sheet with ${questions.length} questions.`,
+      paper: questions.map((q, i) => ({
+        qNum: i + 1, body: q.body, image: q.image,
+        options: { A: q.opt_a, B: q.opt_b, C: q.opt_c, D: q.opt_d },
+      })),
+      answerKey: questions.map((q, i) => ({ qNum: i + 1, correct: q.correct, topic: q.topic })),
+    },
+  });
+}));

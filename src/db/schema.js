@@ -162,8 +162,16 @@ export const initSchema = async () => {
     )
   `;
 
+  // Login lockout (AUTH-6): 5 failures locks the account for 15 minutes.
   await sql`
-    ALTER TABLE live_sessions 
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ
+  `;
+
+  // Databases created before the Zoom Video SDK migration may lack these; harmless otherwise.
+  await sql`
+    ALTER TABLE live_sessions
     ADD COLUMN IF NOT EXISTS zoom_meeting_id TEXT,
     ADD COLUMN IF NOT EXISTS zoom_passcode TEXT,
     ADD COLUMN IF NOT EXISTS zoom_join_url TEXT
@@ -189,6 +197,15 @@ export const initSchema = async () => {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+
+  // Indexes for the hot paths: auto-submit job, student lists, session lists, question picking.
+  await sql`CREATE INDEX IF NOT EXISTS idx_attempts_open ON attempts (deadline_at) WHERE submitted_at IS NULL`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_attempts_student ON attempts (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_questions_course ON questions (course_id) WHERE is_active`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_test_questions_q ON test_questions (question_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_tests_course ON tests (course_id, status)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_class ON live_sessions (class_id, status)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_students_class ON students (class_id, section_id)`;
 
   console.log('PostgreSQL schema initialized successfully.');
 };

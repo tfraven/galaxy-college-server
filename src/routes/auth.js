@@ -3,113 +3,109 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sql } from '../db/connection.js';
 import { config } from '../config/index.js';
+import { asyncHandler, authenticate, fail, invalidateUser, ROLE } from '../middleware/auth.js';
 
 export const authRouter = express.Router();
 
-authRouter.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username) {
-      return res.status(400).json({ success: false, error: 'Username or Roll Number is required' });
-    }
+const MAX_FAILURES = 5;
+const LOCK_MINUTES = 15;
 
-    const users = await sql`
-      SELECT * FROM users WHERE LOWER(username) = LOWER(${username.trim()})
-    `;
-    const user = users[0];
+const toUserDto = (u) => ({
+  id: u.id,
+  role: u.role,
+  username: u.username,
+  fullName: u.full_name,
+  phone: u.phone,
+  isActive: u.is_active,
+  mustChangePw: u.must_change_pw,
+});
 
-    if (!user) {
-      return res.status(401).json({ success: false, error: 'Invalid credentials. User not found.' });
-    }
+authRouter.post('/login', asyncHandler(async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || typeof username !== 'string') {
+    return fail(res, 400, 'Username or Roll Number is required');
+  }
 
-    if (!user.is_active) {
-      return res.status(403).json({ success: false, error: 'Account is deactivated. Contact Admin.' });
-    }
+  const [user] = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${username.trim()})`;
+  // Same message for unknown user and wrong password so usernames can't be enumerated.
+  if (!user) return fail(res, 401, 'Invalid username or password.');
 
-    if (password && !(await bcrypt.compare(password, user.password_hash))) {
-      return res.status(401).json({ success: false, error: 'Invalid password. Please check your credentials.' });
-    }
+  if (user.locked_until && new Date(user.locked_until) > new Date()) {
+    return fail(res, 429, `Too many failed attempts. Try again after ${new Date(user.locked_until).toLocaleTimeString()}.`);
+  }
+  if (!user.is_active) return fail(res, 403, 'Account is deactivated. Contact Admin.');
 
-    let studentProfile = undefined;
-    if (user.role === 4) {
-      const rows = await sql`
-        SELECT s.*, c.name as class_name, sec.name as section_name
-        FROM students s
-        JOIN classes c ON s.class_id = c.id
-        LEFT JOIN sections sec ON s.section_id = sec.id
-        WHERE s.user_id = ${user.id}
-      `;
-      const st = rows[0];
-      if (st) {
-        studentProfile = {
-          userId: st.user_id,
-          rollNo: user.username,
-          classId: st.class_id,
-          className: st.class_name,
-          sectionId: st.section_id,
-          sectionName: st.section_name,
-        };
+  // SECURITY FIX: the old code skipped the password check whenever `password` was empty,
+  // which let anyone log in as any user (including Admin) knowing only the username.
+  if (!password && !config.allowPasswordlessLogin) {
+    return fail(res, 400, 'Password is required.');
+  }
+  if (password) {
+    const ok = await bcrypt.compare(String(password), user.password_hash);
+    if (!ok) {
+      const failures = (user.failed_login_count || 0) + 1;
+      if (failures >= MAX_FAILURES) {
+        await sql`
+          UPDATE users SET failed_login_count = 0, locked_until = NOW() + (${LOCK_MINUTES} || ' minutes')::interval
+          WHERE id = ${user.id}
+        `;
+        return fail(res, 429, `Too many failed attempts. Account locked for ${LOCK_MINUTES} minutes.`);
       }
+      await sql`UPDATE users SET failed_login_count = ${failures} WHERE id = ${user.id}`;
+      return fail(res, 401, 'Invalid username or password.');
     }
-
-    const userDto = {
-      id: user.id,
-      role: user.role,
-      username: user.username,
-      fullName: user.full_name,
-      phone: user.phone,
-      isActive: user.is_active,
-      mustChangePw: user.must_change_pw,
-    };
-
-    const token = jwt.sign(
-      { id: user.id, role: user.role, username: user.username },
-      config.jwtSecret,
-      { expiresIn: '7d' }
-    );
-
-    return res.json({
-      success: true,
-      data: { token, user: userDto, student: studentProfile },
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({ success: false, error: 'Internal server error' });
   }
-});
 
-authRouter.get('/me', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'Missing authorization token' });
-    }
+  await sql`UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ${user.id}`;
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, config.jwtSecret);
-
-    const rows = await sql`
-      SELECT id, role, username, full_name, phone, is_active, must_change_pw
-      FROM users WHERE id = ${decoded.id}
+  let studentProfile;
+  if (user.role === ROLE.STUDENT) {
+    const [st] = await sql`
+      SELECT s.*, c.name AS class_name, sec.name AS section_name
+      FROM students s
+      JOIN classes c ON s.class_id = c.id
+      LEFT JOIN sections sec ON s.section_id = sec.id
+      WHERE s.user_id = ${user.id}
     `;
-    const user = rows[0];
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
+    if (st) {
+      studentProfile = {
+        userId: st.user_id,
+        rollNo: user.username,
+        classId: st.class_id,
+        className: st.class_name,
+        sectionId: st.section_id,
+        sectionName: st.section_name,
+      };
     }
-
-    return res.json({
-      success: true,
-      data: {
-        id: user.id,
-        role: user.role,
-        username: user.username,
-        fullName: user.full_name,
-        phone: user.phone,
-        isActive: user.is_active,
-        mustChangePw: user.must_change_pw,
-      },
-    });
-  } catch (error) {
-    return res.status(401).json({ success: false, error: 'Invalid or expired token' });
   }
-});
+
+  const token = jwt.sign({ id: user.id, role: user.role, username: user.username }, config.jwtSecret, {
+    expiresIn: config.jwtExpiresIn,
+  });
+
+  return res.json({ success: true, data: { token, user: toUserDto(user), student: studentProfile } });
+}));
+
+authRouter.get('/me', authenticate, asyncHandler(async (req, res) => {
+  const [user] = await sql`
+    SELECT id, role, username, full_name, phone, is_active, must_change_pw FROM users WHERE id = ${req.user.id}
+  `;
+  return res.json({ success: true, data: toUserDto(user) });
+}));
+
+// AUTH-3: temporary passwords must be changeable (this endpoint did not exist before).
+authRouter.post('/change-password', authenticate, asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) return fail(res, 400, 'Current and new password are required.');
+  if (String(newPassword).length < 8) return fail(res, 400, 'New password must be at least 8 characters.');
+
+  const [user] = await sql`SELECT password_hash FROM users WHERE id = ${req.user.id}`;
+  if (!(await bcrypt.compare(String(currentPassword), user.password_hash))) {
+    return fail(res, 401, 'Current password is incorrect.');
+  }
+
+  const hash = await bcrypt.hash(String(newPassword), 10);
+  await sql`UPDATE users SET password_hash = ${hash}, must_change_pw = FALSE WHERE id = ${req.user.id}`;
+  invalidateUser(req.user.id);
+  return res.json({ success: true });
+}));
