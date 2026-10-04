@@ -136,11 +136,6 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
 
   if (session.status !== 2) return fail(res, 400, 'This class is not live right now.');
 
-  if (!isHost) {
-    // LIV-8: attendance, one row per student per session.
-    await sql`INSERT INTO session_joins (session_id, student_id) VALUES (${id}, ${req.user.id}) ON CONFLICT DO NOTHING`;
-  }
-
   const sessionName = sessionNameFor(session.id);
   const { token, expiresAt } = generateVideoSdkToken({ sessionName, isHost, userIdentity: `user_${req.user.id}` });
 
@@ -148,6 +143,19 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
     success: true,
     data: { token, sessionName, sessionTitle: session.title, userName: req.user.fullName, isHost, expiresAt, sessionId: session.id },
   });
+}));
+
+// LIV-8: record attendance only after Zoom confirms the user actually joined.
+sessionsRouter.post('/:id/joined', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const access = await getAccess(req.user, id);
+  if (access.error) return fail(res, ...access.error);
+  if (access.session.status !== 2) return fail(res, 400, 'This class is not live right now.');
+
+  if (!access.isHost) {
+    await sql`INSERT INTO session_joins (session_id, student_id) VALUES (${id}, ${req.user.id}) ON CONFLICT DO NOTHING`;
+  }
+  res.json({ success: true, data: { joined: true } });
 }));
 
 // Lightweight poll used by classroom.html so students are dropped when the class is ended (LIV-7).

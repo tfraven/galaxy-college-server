@@ -181,6 +181,17 @@
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
           hide('loading');
           post('joined', { isHost: isHost });
+          if (!isHost && p.i && p.a) {
+            fetch('/api/v1/sessions/' + encodeURIComponent(p.i) + '/joined', {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + p.a },
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                if (!j || !j.success) throw new Error((j && j.error) || 'Attendance could not be recorded.');
+              })
+              .catch(function (err) { console.error('[Classroom attendance]', err); });
+          }
         }
         function onClosed() {
           if (closedSent) return;
@@ -213,12 +224,17 @@
         };
 
         setStatus('Joining class...');
-        joinTimer = setTimeout(function () {
-          if (!joined) showError('Zoom is taking too long to connect. Check your connection and try again.');
-        }, 45000);
+        if (!isHost) {
+          joinTimer = setTimeout(function () {
+            if (!joined) showError('Zoom is taking too long to connect. Check your connection and try again.');
+          }, 45000);
+        }
         var joinResult = uitoolkit.joinSession(container, config);
         uitoolkit.onSessionJoined(onJoined);
         uitoolkit.onSessionClosed(onClosed);
+        // joinSession also opens the teacher's device preview, which must stay interactive.
+        hide('loading');
+        post('ready', { isHost: isHost });
         Promise.resolve(joinResult).catch(function (err) {
           console.error('[Classroom join]', err);
           showError(friendly(err));
