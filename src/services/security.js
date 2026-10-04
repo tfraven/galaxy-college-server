@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import { randomBytes } from 'node:crypto';
 
-/** Random one-time password, e.g. "Pass@482913". Shown once to the admin, never stored in plain text. */
-export const generateTempPassword = () => `Pass@${crypto.randomInt(100000, 1000000)}`;
+/** Random one-time password with 72 bits of entropy. Shown once; only its hash is stored. */
+export const generateTempPassword = () => `Temp-${randomBytes(9).toString('base64url')}`;

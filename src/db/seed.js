@@ -3,6 +3,10 @@ import { sql } from './connection.js';
 import { initSchema } from './schema.js';
 
 export const seedDatabase = async () => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('The demo seed is disabled in production; create the initial administrator through a secure, one-time setup process.');
+  }
+
   await initSchema();
 
   const [{ cnt }] = await sql`SELECT COUNT(*)::int as cnt FROM users`;

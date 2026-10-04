@@ -295,7 +295,7 @@
     var UIKIT_BASE = 'https://source.zoom.us/uitoolkit/' + UIKIT_VERSION + '/';
     var originalJoinUrl = window.location.href;
 
-    /* URL hash contract (set by the app):  #t=<zoomJwt>&s=<sessionName>&n=<userName>&h=<1|0>&i=<sessionId>&a=<appJwt> */
+    /* URL hash contract (set by the app):  #t=<zoomJwt>&s=<sessionName>&n=<userName>&h=<1|0> */
     function parseHash() {
       var out = {};
       window.location.hash.slice(1).split('&').forEach(function (pair) {
@@ -372,30 +372,17 @@
         var container = document.getElementById('session');
         var closedSent = false;
         var joined = false;
-        var poller = null;
         function onJoined() {
           if (joined || closedSent) return;
           joined = true;
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
           hide('loading');
           post('joined', { isHost: isHost });
-          if (!isHost && p.i && p.a) {
-            fetch('/api/v1/sessions/' + encodeURIComponent(p.i) + '/joined', {
-              method: 'POST',
-              headers: { Authorization: 'Bearer ' + p.a },
-            })
-              .then(function (r) { return r.json(); })
-              .then(function (j) {
-                if (!j || !j.success) throw new Error((j && j.error) || 'Attendance could not be recorded.');
-              })
-              .catch(function (err) { console.error('[Classroom attendance]', err); });
-          }
         }
         function onClosed() {
           if (closedSent) return;
           closedSent = true;
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
-          clearInterval(poller);
           try { uitoolkit.closeSession(container); } catch (e) { }
           post('closed', { isHost: isHost });
           hide('loading');
@@ -439,15 +426,6 @@
           showError(friendly(err));
         });
 
-        /* LIV-7: when staff end the class in the app, drop everyone still connected. */
-        if (p.i && p.a) {
-          poller = setInterval(function () {
-            fetch('/api/v1/sessions/' + encodeURIComponent(p.i) + '/live-status', { headers: { Authorization: 'Bearer ' + p.a } })
-              .then(function (r) { return r.json(); })
-              .then(function (j) { if (j && j.success && j.data.status === 3) onClosed(); })
-              .catch(function () { /* transient network error: try again next tick */ });
-          }, 10000);
-        }
       } catch (err) {
         console.error('[Classroom]', err);
         showError(friendly(err));

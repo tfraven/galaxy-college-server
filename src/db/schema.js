@@ -11,6 +11,7 @@ export const initSchema = async () => {
       phone TEXT,
       is_active BOOLEAN DEFAULT TRUE,
       must_change_pw BOOLEAN DEFAULT FALSE,
+      token_version INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
@@ -162,12 +163,27 @@ export const initSchema = async () => {
     )
   `;
 
-  // Login lockout (AUTH-6): 5 failures locks the account for 15 minutes.
   await sql`
     ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ
+    ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0
   `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username))`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS security_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS login_rate_limits (
+      ip_hash TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      reset_at TIMESTAMPTZ NOT NULL
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_login_rate_limits_reset_at ON login_rate_limits (reset_at)`;
 
   // Databases created before the Zoom Video SDK migration may lack these; harmless otherwise.
   await sql`

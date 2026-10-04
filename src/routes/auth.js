@@ -3,12 +3,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sql } from '../db/connection.js';
 import { config } from '../config/index.js';
-import { asyncHandler, authenticate, fail, invalidateUser, ROLE } from '../middleware/auth.js';
+import { asyncHandler, authenticate, fail, ROLE } from '../middleware/auth.js';
+import { consumeLoginRateLimit } from '../services/loginRateLimit.js';
 
 export const authRouter = express.Router();
-
-const MAX_FAILURES = 5;
-const LOCK_MINUTES = 15;
 
 const toUserDto = (u) => ({
   id: u.id,
@@ -22,41 +20,35 @@ const toUserDto = (u) => ({
 
 authRouter.post('/login', asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
-  if (!username || typeof username !== 'string') {
-    return fail(res, 400, 'Username or Roll Number is required');
+  if (typeof username !== 'string' || !username.trim() || username.trim().length > 128) {
+    return fail(res, 400, 'Enter a valid username or Roll Number.');
+  }
+  if (typeof password !== 'string' || !password || password.length > 128 || Buffer.byteLength(password, 'utf8') > 72) {
+    return fail(res, 400, 'Enter a valid password.');
   }
 
-  const [user] = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${username.trim()})`;
+  const rateLimit = await consumeLoginRateLimit(req.ip || req.socket.remoteAddress);
+  res.setHeader('RateLimit-Limit', String(rateLimit.limit));
+  res.setHeader('RateLimit-Remaining', String(rateLimit.remaining));
+  res.setHeader('RateLimit-Reset', String(Math.ceil(Date.now() / 1000) + rateLimit.retryAfterSeconds));
+  if (rateLimit.limited) {
+    res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+    return fail(res, 429, 'Too many login attempts. Try again later.');
+  }
+
+  const [user] = await sql`
+    SELECT id, role, username, password_hash, full_name, phone, is_active, must_change_pw, token_version
+    FROM users WHERE LOWER(username) = LOWER(${username.trim()})
+  `;
   // Same message for unknown user and wrong password so usernames can't be enumerated.
   if (!user) return fail(res, 401, 'Invalid username or password.');
 
-  if (user.locked_until && new Date(user.locked_until) > new Date()) {
-    return fail(res, 429, `Too many failed attempts. Try again after ${new Date(user.locked_until).toLocaleTimeString()}.`);
-  }
   if (!user.is_active) return fail(res, 403, 'Account is deactivated. Contact Admin.');
 
-  // SECURITY FIX: the old code skipped the password check whenever `password` was empty,
-  // which let anyone log in as any user (including Admin) knowing only the username.
-  if (!password && !config.allowPasswordlessLogin) {
-    return fail(res, 400, 'Password is required.');
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) {
+    return fail(res, 401, 'Invalid username or password.');
   }
-  if (password) {
-    const ok = await bcrypt.compare(String(password), user.password_hash);
-    if (!ok) {
-      const failures = (user.failed_login_count || 0) + 1;
-      if (failures >= MAX_FAILURES) {
-        await sql`
-          UPDATE users SET failed_login_count = 0, locked_until = NOW() + (${LOCK_MINUTES} || ' minutes')::interval
-          WHERE id = ${user.id}
-        `;
-        return fail(res, 429, `Too many failed attempts. Account locked for ${LOCK_MINUTES} minutes.`);
-      }
-      await sql`UPDATE users SET failed_login_count = ${failures} WHERE id = ${user.id}`;
-      return fail(res, 401, 'Invalid username or password.');
-    }
-  }
-
-  await sql`UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ${user.id}`;
 
   let studentProfile;
   if (user.role === ROLE.STUDENT) {
@@ -79,8 +71,11 @@ authRouter.post('/login', asyncHandler(async (req, res) => {
     }
   }
 
-  const token = jwt.sign({ id: user.id, role: user.role, username: user.username }, config.jwtSecret, {
+  const token = jwt.sign({ id: user.id, ver: user.token_version }, config.jwtSecret, {
     expiresIn: config.jwtExpiresIn,
+    algorithm: 'HS256',
+    issuer: config.jwtIssuer,
+    audience: config.jwtAudience,
   });
 
   return res.json({ success: true, data: { token, user: toUserDto(user), student: studentProfile } });
@@ -96,16 +91,31 @@ authRouter.get('/me', authenticate, asyncHandler(async (req, res) => {
 // AUTH-3: temporary passwords must be changeable (this endpoint did not exist before).
 authRouter.post('/change-password', authenticate, asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
-  if (!currentPassword || !newPassword) return fail(res, 400, 'Current and new password are required.');
-  if (String(newPassword).length < 8) return fail(res, 400, 'New password must be at least 8 characters.');
+  if (typeof currentPassword !== 'string' || !currentPassword || typeof newPassword !== 'string') {
+    return fail(res, 400, 'Current and new password are required.');
+  }
+  if (newPassword.length < 12) return fail(res, 400, 'New password must be at least 12 characters.');
+  if (newPassword.length > 128 || Buffer.byteLength(newPassword, 'utf8') > 72) {
+    return fail(res, 400, 'New password must be 72 bytes or less.');
+  }
 
   const [user] = await sql`SELECT password_hash FROM users WHERE id = ${req.user.id}`;
-  if (!(await bcrypt.compare(String(currentPassword), user.password_hash))) {
+  if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
     return fail(res, 401, 'Current password is incorrect.');
   }
 
-  const hash = await bcrypt.hash(String(newPassword), 10);
-  await sql`UPDATE users SET password_hash = ${hash}, must_change_pw = FALSE WHERE id = ${req.user.id}`;
-  invalidateUser(req.user.id);
-  return res.json({ success: true });
+  const hash = await bcrypt.hash(newPassword, 10);
+  const [updated] = await sql`
+    UPDATE users
+    SET password_hash = ${hash}, must_change_pw = FALSE, token_version = token_version + 1
+    WHERE id = ${req.user.id}
+    RETURNING token_version
+  `;
+  const token = jwt.sign({ id: req.user.id, ver: updated.token_version }, config.jwtSecret, {
+    expiresIn: config.jwtExpiresIn,
+    algorithm: 'HS256',
+    issuer: config.jwtIssuer,
+    audience: config.jwtAudience,
+  });
+  return res.json({ success: true, data: { token } });
 }));
