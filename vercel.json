@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/index.js": {
+      "includeFiles": "src/views/classroom.html"
+    }
+  }
+}

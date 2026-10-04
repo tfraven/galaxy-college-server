@@ -162,6 +162,9 @@ const start = async () => {
     if (!zoomConfigured()) {
       console.warn('[zoom] ZOOM_SDK_KEY / ZOOM_SDK_SECRET missing: live classes cannot issue join tokens.');
     }
+    if (config.isProd && config.corsOrigins.length === 0) {
+      console.warn('[security] CORS_ORIGINS is empty; browser frontends on other origins cannot call this API.');
+    }
     setInterval(autoSubmitExpiredAttempts, 30_000);
 
     app.listen(config.port, () => {

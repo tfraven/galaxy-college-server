@@ -42,8 +42,7 @@ authRouter.post('/login', asyncHandler(async (req, res) => {
   `;
   // Same message for unknown user and wrong password so usernames can't be enumerated.
   if (!user) return fail(res, 401, 'Invalid username or password.');
-
-  if (!user.is_active) return fail(res, 403, 'Account is deactivated. Contact Admin.');
+  if (!user.is_active) return fail(res, 401, 'Invalid username or password.');
 
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) {
