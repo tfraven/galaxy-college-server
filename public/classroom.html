@@ -124,10 +124,12 @@
       try { if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage(payload); return; } } catch (e) { }
       if (window.parent !== window) window.parent.postMessage(payload, '*');
     }
+    var joinTimer = null;
     function hide(id) { document.getElementById(id).classList.add('hidden'); }
     function show(id) { document.getElementById(id).classList.remove('hidden'); }
     function setStatus(m) { document.getElementById('status-msg').textContent = m; }
     function showError(msg) {
+      if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
       hide('loading');
       document.getElementById('error-msg').textContent = msg;
       show('error');
@@ -171,9 +173,19 @@
 
         var container = document.getElementById('session');
         var closedSent = false;
+        var joined = false;
+        var poller = null;
+        function onJoined() {
+          if (joined || closedSent) return;
+          joined = true;
+          if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
+          hide('loading');
+          post('joined', { isHost: isHost });
+        }
         function onClosed() {
           if (closedSent) return;
           closedSent = true;
+          if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
           clearInterval(poller);
           try { uitoolkit.closeSession(container); } catch (e) { }
           post('closed', { isHost: isHost });
@@ -201,15 +213,18 @@
         };
 
         setStatus('Joining class...');
-        await uitoolkit.joinSession(container, config);
-        hide('loading');
-
-        uitoolkit.onSessionJoined(function () { post('joined', { isHost: isHost }); });
+        joinTimer = setTimeout(function () {
+          if (!joined) showError('Zoom is taking too long to connect. Check your connection and try again.');
+        }, 45000);
+        var joinResult = uitoolkit.joinSession(container, config);
+        uitoolkit.onSessionJoined(onJoined);
         uitoolkit.onSessionClosed(onClosed);
-        post('joined', { isHost: isHost });
+        Promise.resolve(joinResult).catch(function (err) {
+          console.error('[Classroom join]', err);
+          showError(friendly(err));
+        });
 
         /* LIV-7: when staff end the class in the app, drop everyone still connected. */
-        var poller = null;
         if (p.i && p.a) {
           poller = setInterval(function () {
             fetch('/api/v1/sessions/' + encodeURIComponent(p.i) + '/live-status', { headers: { Authorization: 'Bearer ' + p.a } })
