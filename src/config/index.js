@@ -26,7 +26,7 @@ export const config = {
   // Dev-only escape hatch for the old "log in with roll number only" behaviour. Ignored in production.
   allowPasswordlessLogin: !isProd && process.env.ALLOW_PASSWORDLESS_LOGIN === 'true',
   zoom: {
-    // Must be the *Video SDK* key + secret (Marketplace > Develop > Build Video SDK App), not Meeting SDK.
+    // Must be the Video SDK SDK Key + SDK Secret, not OAuth Client ID/Secret, API keys, or Meeting SDK credentials.
     sdkKey: process.env.ZOOM_SDK_KEY || '',
     sdkSecret: process.env.ZOOM_SDK_SECRET || '',
   },

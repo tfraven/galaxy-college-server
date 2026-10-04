@@ -19,43 +19,96 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #090d16;
-      font-family: system-ui, sans-serif;
+      background: #080d18;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: #e2e8f0;
     }
 
     #session {
       width: 100%;
       height: 100%;
+      min-height: 100dvh;
     }
 
-    .overlay {
+    .state-screen {
       position: fixed;
       inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      padding: 32px;
-      text-align: center;
-      background: #090d16;
+      display: grid;
+      place-items: center;
+      padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(56, 189, 248, .12), transparent 54%),
+        rgba(8, 13, 24, .98);
       z-index: 9999;
-      transition: opacity .3s;
+      opacity: 1;
+      transition: opacity .22s ease;
     }
 
-    .overlay.hidden {
+    .state-screen.hidden {
       opacity: 0;
       pointer-events: none;
     }
 
+    .state-card {
+      width: min(100%, 430px);
+      padding: clamp(24px, 6vw, 36px);
+      border: 1px solid rgba(148, 163, 184, .16);
+      border-radius: 24px;
+      background: linear-gradient(145deg, rgba(24, 36, 57, .96), rgba(15, 23, 39, .98));
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .42), inset 0 1px rgba(255, 255, 255, .035);
+      text-align: left;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 34px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      color: #dff6ff;
+      border: 1px solid rgba(125, 211, 252, .26);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(14, 165, 233, .3), rgba(37, 99, 235, .16));
+    }
+
+    .brand-name {
+      color: #f8fafc;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+
+    .brand-product {
+      margin-top: 3px;
+      color: #8ea0bb;
+      font-size: 12px;
+    }
+
+    .loading-visual {
+      display: grid;
+      width: 68px;
+      height: 68px;
+      place-items: center;
+      margin-bottom: 24px;
+      border: 1px solid rgba(56, 189, 248, .16);
+      border-radius: 20px;
+      background: rgba(14, 165, 233, .08);
+    }
+
     .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(99, 102, 241, .2);
-      border-top-color: #6366f1;
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(125, 211, 252, .16);
+      border-top-color: #38bdf8;
+      border-right-color: #38bdf8;
       border-radius: 50%;
-      animation: spin .8s linear infinite;
+      animation: spin .85s linear infinite;
     }
 
     @keyframes spin {
@@ -64,27 +117,120 @@
       }
     }
 
+    .eyebrow {
+      margin-bottom: 9px;
+      color: #7dd3fc;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .state-card h1 {
+      color: #f8fafc;
+      font-size: clamp(22px, 6vw, 27px);
+      font-weight: 700;
+      letter-spacing: -.035em;
+      line-height: 1.15;
+    }
+
     #status-msg {
+      margin-top: 11px;
+      color: #a8b6ca;
       font-size: 14px;
-      color: #94a3b8;
+      line-height: 1.55;
+    }
+
+    .progress-track {
+      height: 4px;
+      overflow: hidden;
+      margin-top: 24px;
+      border-radius: 99px;
+      background: rgba(148, 163, 184, .14);
+    }
+
+    .progress-track span {
+      display: block;
+      width: 36%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #0ea5e9, #60a5fa);
+      animation: progress 1.6s ease-in-out infinite;
+    }
+
+    @keyframes progress {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(300%); }
+    }
+
+    .state-footnote {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 18px;
+      color: #74849c;
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     #error-msg {
+      margin-top: 11px;
+      color: #a8b6ca;
       font-size: 14px;
-      color: #f87171;
-      max-width: 340px;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
-    button {
-      margin-top: 6px;
-      padding: 10px 24px;
-      background: #6366f1;
-      color: #fff;
+    .error-mark {
+      display: grid;
+      width: 54px;
+      height: 54px;
+      place-items: center;
+      margin-bottom: 22px;
+      color: #fda4af;
+      border: 1px solid rgba(251, 113, 133, .22);
+      border-radius: 18px;
+      background: rgba(190, 24, 93, .12);
+    }
+
+    .retry-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 46px;
+      margin-top: 25px;
+      padding: 0 18px;
+      color: #07111f;
       border: 0;
-      border-radius: 8px;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #7dd3fc, #38bdf8);
       font-size: 14px;
+      font-weight: 700;
       cursor: pointer;
+      transition: transform .15s ease, filter .15s ease;
+    }
+
+    .retry-button:hover {
+      filter: brightness(1.06);
+      transform: translateY(-1px);
+    }
+
+    .retry-button:focus-visible {
+      outline: 3px solid rgba(125, 211, 252, .4);
+      outline-offset: 3px;
+    }
+
+    @media (max-width: 420px) {
+      .state-card { border-radius: 20px; }
+      .brand-row { margin-bottom: 28px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
     }
   </style>
 </head>
@@ -92,13 +238,51 @@
 <body>
   <div id="session"></div>
 
-  <div id="loading" class="overlay">
-    <div class="spinner"></div>
-    <p id="status-msg">Connecting to classroom...</p>
+  <div id="loading" class="state-screen" role="status" aria-live="polite">
+    <section class="state-card">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="6" width="13" height="12" rx="3" stroke="currentColor" stroke-width="1.8" />
+            <path d="m16 10 5-3v10l-5-3" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+          </svg>
+        </div>
+        <div>
+          <p class="brand-name">College Runner</p>
+          <p class="brand-product">Live classroom</p>
+        </div>
+      </div>
+      <div class="loading-visual" aria-hidden="true"><div class="spinner"></div></div>
+      <p class="eyebrow">Live session</p>
+      <h1>Opening your classroom</h1>
+      <p id="status-msg">Getting your video room ready…</p>
+      <div class="progress-track" aria-hidden="true"><span></span></div>
+      <p class="state-footnote">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3 19 6v5c0 4.4-2.8 8.2-7 10-4.2-1.8-7-5.6-7-10V6l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+          <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Your class controls will appear here once Zoom is ready.
+      </p>
+    </section>
   </div>
-  <div id="error" class="overlay hidden">
-    <p style="font-size:32px">📡</p>
-    <p id="error-msg"></p><button onclick="location.reload()">Try again</button>
+  <div id="error" class="state-screen hidden" role="alert" aria-live="assertive">
+    <section class="state-card">
+      <div class="error-mark" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <path d="M12 9v4m0 4h.01M10.3 3.9 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3l-7.5-13.1a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <p class="eyebrow">Connection issue</p>
+      <h1 id="error-title">Couldn't join this class</h1>
+      <p id="error-msg"></p>
+      <button class="retry-button" onclick="retryJoin()">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20 11a8 8 0 0 0-14-5L4 8m0-5v5h5m-5 5a8 8 0 0 0 14 5l2-2m0 5v-5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Try again
+      </button>
+    </section>
   </div>
 
   <script>
@@ -109,6 +293,7 @@
      */
     var UIKIT_VERSION = '2.5.0-1';
     var UIKIT_BASE = 'https://source.zoom.us/uitoolkit/' + UIKIT_VERSION + '/';
+    var originalJoinUrl = window.location.href;
 
     /* URL hash contract (set by the app):  #t=<zoomJwt>&s=<sessionName>&n=<userName>&h=<1|0>&i=<sessionId>&a=<appJwt> */
     function parseHash() {
@@ -131,9 +316,18 @@
     function showError(msg) {
       if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
       hide('loading');
+      document.getElementById('error-title').textContent = "Couldn't join this class";
       document.getElementById('error-msg').textContent = msg;
       show('error');
       post('error', { message: msg });
+    }
+    function retryJoin() {
+      post('retry');
+      // Embedded clients reload from their source URL, which still holds the fragment token.
+      // Preserve a standalone fallback too, because main() removes the fragment from history.
+      if (!window.ReactNativeWebView && window.parent === window && originalJoinUrl) {
+        window.location.replace(originalJoinUrl);
+      }
     }
     function loadCss(href) {
       var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l);
@@ -150,7 +344,7 @@
       var r = String((err && (err.reason || err.message || err.errorMessage)) || err || '');
       if (/sdk-load/.test(r)) return 'Could not load the Zoom classroom (version ' + UIKIT_VERSION + '). Check your connection and try again.';
       if (/SESSION_FETCH_INFO_ERROR|verify jwt failed|account does not exist or does not belong to you/i.test(r)) {
-        return 'Zoom rejected the session credentials. Set ZOOM_SDK_KEY and ZOOM_SDK_SECRET to the matching pair from the same Zoom Video SDK app.';
+        return 'Zoom rejected this session token. The server must use Video SDK SDK credentials; OAuth Client ID/Secret and webhook tokens cannot authorize class sessions.';
       }
       if (/token|signature|jwt|expired/i.test(r)) return 'Your class pass has expired or is invalid. Go back and join again.';
       if (/timed out waiting for session to join/i.test(r)) return 'Zoom could not finish connecting. Check the Video SDK credentials and your network connection, then try again.';
@@ -205,6 +399,7 @@
           try { uitoolkit.closeSession(container); } catch (e) { }
           post('closed', { isHost: isHost });
           hide('loading');
+          document.getElementById('error-title').textContent = 'Class ended';
           document.getElementById('error-msg').textContent = 'The class has ended.';
           show('error');
           document.querySelector('#error button').style.display = 'none';
