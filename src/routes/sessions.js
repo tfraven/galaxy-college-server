@@ -2,7 +2,7 @@ import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, isStaff, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageClass, getStudentEnrolment } from '../services/access.js';
-import { generateVideoSdkToken, sessionNameFor } from '../services/zoom.js';
+import { generateVideoSdkToken, sessionIdFromReference, sessionNameFor, sessionReferenceFor } from '../services/zoom.js';
 
 export const sessionsRouter = express.Router();
 
@@ -22,6 +22,19 @@ const toDto = (s) => ({
   startedAt: s.started_at,
   endedAt: s.ended_at,
   participantCount: parseInt(s.participant_count, 10) || 0,
+});
+
+// Student payloads only include a public join handle and the details needed to choose a class.
+const toStudentDto = (s) => ({
+  id: sessionReferenceFor(s.id),
+  courseName: s.course_name,
+  title: s.title,
+  hostName: s.hostname || 'Faculty Instructor',
+  planStart: s.plan_start,
+  planEnd: s.plan_end,
+  status: s.status,
+  startedAt: s.started_at,
+  endedAt: s.ended_at,
 });
 
 const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId = null } = {}) => sql`
@@ -72,7 +85,7 @@ sessionsRouter.get('/', asyncHandler(async (req, res) => {
   } else {
     rows = await fetchSessions({ teacherId: req.user.role === ROLE.TEACHER ? req.user.id : null });
   }
-  res.json({ success: true, data: rows.map(toDto) });
+  res.json({ success: true, data: rows.map(req.user.role === ROLE.STUDENT ? toStudentDto : toDto) });
 }));
 
 // LIV-1: schedule. No Zoom link/ID needed: the room is derived from the session id.
@@ -107,7 +120,7 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
 const NEXT = { 1: [2, 3], 2: [3] }; // Scheduled -> Live | Ended ; Live -> Ended (LIV-3)
 
 sessionsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
-  const id = toInt(req.params.id);
+  const id = sessionIdFromReference(req.params.id);
   const status = toInt(req.body?.status);
   if (![1, 2, 3].includes(status)) return fail(res, 400, 'Status must be 1, 2 or 3');
 
@@ -129,7 +142,7 @@ sessionsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(as
  * student can no longer send a teacher's id in the body and get host rights.
  */
 sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
-  const id = toInt(req.params.id);
+  const id = sessionIdFromReference(req.params.id);
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
   const { session, isHost } = access;
@@ -141,13 +154,13 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: { token, sessionName, sessionTitle: session.title, userName: req.user.fullName, isHost, expiresAt, sessionId: session.id },
+    data: { token, sessionName, userName: req.user.fullName, isHost, expiresAt },
   });
 }));
 
 // LIV-8: record attendance only after Zoom confirms the user actually joined.
 sessionsRouter.post('/:id/joined', asyncHandler(async (req, res) => {
-  const id = toInt(req.params.id);
+  const id = sessionIdFromReference(req.params.id);
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
   if (access.session.status !== 2) return fail(res, 400, 'This class is not live right now.');
@@ -160,14 +173,14 @@ sessionsRouter.post('/:id/joined', asyncHandler(async (req, res) => {
 
 // Lightweight poll used by classroom.html so students are dropped when the class is ended (LIV-7).
 sessionsRouter.get('/:id/live-status', asyncHandler(async (req, res) => {
-  const access = await getAccess(req.user, toInt(req.params.id));
+  const access = await getAccess(req.user, sessionIdFromReference(req.params.id));
   if (access.error) return fail(res, ...access.error);
   res.json({ success: true, data: { status: access.session.status } });
 }));
 
 // LIV-6: staff see who joined.
 sessionsRouter.get('/:id/participants', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
-  const id = toInt(req.params.id);
+  const id = sessionIdFromReference(req.params.id);
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
   const data = await sql`
@@ -180,19 +193,18 @@ sessionsRouter.get('/:id/participants', requireRole(...STAFF_ROLES), asyncHandle
 
 // Optional app-level chat (LIV-10). Zoom's toolkit has its own chat, so you may delete these.
 sessionsRouter.get('/:id/messages', asyncHandler(async (req, res) => {
-  const id = toInt(req.params.id);
+  const id = sessionIdFromReference(req.params.id);
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
   const data = await sql`
-    SELECT id, session_id AS "sessionId", user_id AS "userId", sender_name AS "senderName",
-           sender_role AS "senderRole", message, created_at AS "createdAt"
+    SELECT id, sender_name AS "senderName", sender_role AS "senderRole", message, created_at AS "createdAt"
     FROM session_messages WHERE session_id = ${id} ORDER BY created_at ASC LIMIT 200
   `;
   res.json({ success: true, data });
 }));
 
 sessionsRouter.post('/:id/messages', asyncHandler(async (req, res) => {
-  const id = toInt(req.params.id);
+  const id = sessionIdFromReference(req.params.id);
   const message = String(req.body?.message || '').trim();
   if (!message) return fail(res, 400, 'Message cannot be empty');
   if (message.length > 1000) return fail(res, 400, 'Message is too long');
@@ -202,8 +214,7 @@ sessionsRouter.post('/:id/messages', asyncHandler(async (req, res) => {
   const [saved] = await sql`
     INSERT INTO session_messages (session_id, user_id, sender_name, sender_role, message)
     VALUES (${id}, ${req.user.id}, ${req.user.fullName}, ${isStaff(req.user) ? 'Faculty' : 'Student'}, ${message})
-    RETURNING id, session_id AS "sessionId", user_id AS "userId", sender_name AS "senderName",
-              sender_role AS "senderRole", message, created_at AS "createdAt"
+    RETURNING id, sender_name AS "senderName", sender_role AS "senderRole", message, created_at AS "createdAt"
   `;
   res.status(201).json({ success: true, data: saved });
 }));

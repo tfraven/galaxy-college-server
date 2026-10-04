@@ -1,8 +1,41 @@
 import jwt from 'jsonwebtoken';
+import { createHmac } from 'node:crypto';
 import { config } from '../config/index.js';
 
-// One Zoom room per class session, derived from the DB id (no link/ID is ever stored or shown).
-export const sessionNameFor = (sessionId) => `class_${sessionId}`;
+// Student-facing references avoid exposing sequential database ids in the UI or API payloads.
+export const sessionReferenceFor = (sessionId) =>
+  `s_${Buffer.from(String(sessionId), 'utf8').toString('base64url')}`;
+
+export const sessionIdFromReference = (reference) => {
+  if (typeof reference !== 'string') return null;
+  if (/^[1-9]\d*$/.test(reference)) {
+    const id = Number(reference);
+    return Number.isSafeInteger(id) ? id : null;
+  }
+  if (!/^s_[A-Za-z0-9_-]+$/.test(reference)) return null;
+
+  try {
+    const encoded = reference.slice(2);
+    const decoded = Buffer.from(encoded, 'base64url').toString('utf8');
+    const id = Number(decoded);
+    return /^[1-9]\d*$/.test(decoded)
+      && Number.isSafeInteger(id)
+      && sessionReferenceFor(id) === reference
+      ? id
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+// Stable Zoom room names are keyed and do not reveal the sequential database id.
+export const sessionNameFor = (sessionId) => {
+  const digest = createHmac('sha256', config.zoom.sdkSecret || config.jwtSecret)
+    .update(`live-session:${sessionId}`)
+    .digest('hex')
+    .slice(0, 26);
+  return `class_${digest}`;
+};
 
 const isPlaceholder = (v) => !v || /YOUR_ZOOM/i.test(v);
 
