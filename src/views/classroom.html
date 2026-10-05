@@ -51,8 +51,16 @@
       transform: translateX(-50%);
     }
 
-    #reconnecting.visible { display: flex; }
-    #reconnecting .spinner { width: 15px; height: 15px; border-width: 2px; margin: 0; }
+    #reconnecting.visible {
+      display: flex;
+    }
+
+    #reconnecting .spinner {
+      width: 15px;
+      height: 15px;
+      border-width: 2px;
+      margin: 0;
+    }
 
     .state-screen {
       position: fixed;
@@ -183,8 +191,13 @@
     }
 
     @keyframes progress {
-      0% { transform: translateX(-110%); }
-      100% { transform: translateX(300%); }
+      0% {
+        transform: translateX(-110%);
+      }
+
+      100% {
+        transform: translateX(300%);
+      }
     }
 
     .state-footnote {
@@ -245,12 +258,20 @@
     }
 
     @media (max-width: 420px) {
-      .state-card { border-radius: 20px; }
-      .brand-row { margin-bottom: 28px; }
+      .state-card {
+        border-radius: 20px;
+      }
+
+      .brand-row {
+        margin-bottom: 28px;
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
+
+      *,
+      *::before,
+      *::after {
         animation-duration: .01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: .01ms !important;
@@ -280,15 +301,19 @@
           <p class="brand-product">Live classroom</p>
         </div>
       </div>
-      <div class="loading-visual" aria-hidden="true"><div class="spinner"></div></div>
+      <div class="loading-visual" aria-hidden="true">
+        <div class="spinner"></div>
+      </div>
       <p class="eyebrow">Live session</p>
       <h1>Opening your classroom</h1>
       <p id="status-msg">Getting your video room ready…</p>
       <div class="progress-track" aria-hidden="true"><span></span></div>
       <p class="state-footnote">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 3 19 6v5c0 4.4-2.8 8.2-7 10-4.2-1.8-7-5.6-7-10V6l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
-          <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 3 19 6v5c0 4.4-2.8 8.2-7 10-4.2-1.8-7-5.6-7-10V6l7-3Z" stroke="currentColor" stroke-width="1.7"
+            stroke-linejoin="round" />
+          <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+            stroke-linejoin="round" />
         </svg>
         Your class controls will appear here once Zoom is ready.
       </p>
@@ -298,7 +323,8 @@
     <section class="state-card">
       <div class="error-mark" aria-hidden="true">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-          <path d="M12 9v4m0 4h.01M10.3 3.9 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3l-7.5-13.1a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 9v4m0 4h.01M10.3 3.9 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3l-7.5-13.1a2 2 0 0 0-3.4 0Z"
+            stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </div>
       <p class="eyebrow">Connection issue</p>
@@ -306,7 +332,8 @@
       <p id="error-msg"></p>
       <button class="retry-button" onclick="retryJoin()">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M20 11a8 8 0 0 0-14-5L4 8m0-5v5h5m-5 5a8 8 0 0 0 14 5l2-2m0 5v-5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M20 11a8 8 0 0 0-14-5L4 8m0-5v5h5m-5 5a8 8 0 0 0 14 5l2-2m0 5v-5h-5" stroke="currentColor"
+            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         Try again
       </button>
@@ -319,6 +346,8 @@
      * The previous page used the low-level SDK but never rendered other people's video, so students saw nothing.
      * Pin the version; check https://www.npmjs.com/package/@zoom/videosdk-ui-toolkit for newer releases.
      */
+    // Keep the Zoom UI Toolkit version pinned so different WebView versions
+    // do not receive different SDK builds during the same class.
     var UIKIT_VERSION = '2.5.0-1';
     var UIKIT_BASE = 'https://source.zoom.us/uitoolkit/' + UIKIT_VERSION + '/';
     var originalJoinUrl = window.location.href;
