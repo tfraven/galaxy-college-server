@@ -412,15 +412,16 @@
         var joined = false;
         var connectionListenerAttached = false;
         var diagnosticListeners = [];
+        var networkInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
         var onOnline = function () { logPageDiagnostic('browser-online'); };
         var onOffline = function () { logPageDiagnostic('browser-offline'); };
         var onVisibilityChange = function () { logPageDiagnostic('visibility-change'); };
+        var onNetworkChange = function () { logPageDiagnostic('network-change'); };
         var joinTimeoutExtendedForReconnect = false;
         function logPageDiagnostic(eventName) {
           var userAgent = String(navigator.userAgent || '');
           var androidMatch = userAgent.match(/Android\s+([\d.]+)/i);
           var webViewMatch = userAgent.match(/(?:Chrome|Chromium)\/([\d.]+)/i);
-          var network = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
           var details = {
             event: eventName,
             online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
@@ -428,10 +429,13 @@
             androidVersion: androidMatch ? androidMatch[1] : null,
             webViewVersion: webViewMatch ? webViewMatch[1] : null,
             embeddedWebView: /;\s*wv\)/i.test(userAgent) || /Version\/4\.0/i.test(userAgent),
-            effectiveType: network && typeof network.effectiveType === 'string' ? network.effectiveType : null,
-            networkRttMs: network && Number.isFinite(Number(network.rtt)) ? Math.round(Number(network.rtt)) : null,
-            networkDownlinkMbps: network && Number.isFinite(Number(network.downlink))
-              ? Math.round(Number(network.downlink) * 10) / 10
+            networkType: networkInfo && typeof networkInfo.type === 'string' ? networkInfo.type : null,
+            effectiveType: networkInfo && typeof networkInfo.effectiveType === 'string' ? networkInfo.effectiveType : null,
+            networkRttMs: networkInfo && typeof networkInfo.rtt === 'number' && Number.isFinite(networkInfo.rtt)
+              ? Math.round(networkInfo.rtt)
+              : null,
+            networkDownlinkMbps: networkInfo && typeof networkInfo.downlink === 'number' && Number.isFinite(networkInfo.downlink)
+              ? Math.round(networkInfo.downlink * 10) / 10
               : null,
           };
           console.warn('[Classroom diagnostic]', details);
@@ -460,10 +464,16 @@
           window.removeEventListener('online', onOnline);
           window.removeEventListener('offline', onOffline);
           document.removeEventListener('visibilitychange', onVisibilityChange);
+          if (networkInfo && typeof networkInfo.removeEventListener === 'function') {
+            networkInfo.removeEventListener('change', onNetworkChange);
+          }
         }
         window.addEventListener('online', onOnline);
         window.addEventListener('offline', onOffline);
         document.addEventListener('visibilitychange', onVisibilityChange);
+        if (networkInfo && typeof networkInfo.addEventListener === 'function') {
+          networkInfo.addEventListener('change', onNetworkChange);
+        }
         logPageDiagnostic('runtime-context');
         function extendJoinTimeoutForReconnect() {
           if (joined || joinTimeoutExtendedForReconnect) return;
@@ -482,16 +492,8 @@
 
           if (state === 'Reconnecting') {
             var reason = event.reason || null;
-            // reason === 'failover': Zoom is proactively switching data centres for load-balancing.
-            // These always resolve to Connected within milliseconds and are invisible to the user.
-            // Do NOT show the reconnecting banner or extend the join timeout for them — that would
-            // cause a false-alarm flash on every Zoom server rotation.
-            if (reason === 'failover') {
-              // Silently absorb; notify the native shell so it can log if needed.
-              post('connection', { state: state, reason: reason });
-              return;
-            }
-            // Real network disruption: extend timeout and show the banner after 2 s.
+            // Zoom also reports failover as Reconnecting; media is unavailable until
+            // recovery, so keep the in-meeting UI honest and show a delayed banner.
             extendJoinTimeoutForReconnect();
             if (!reconnectBannerTimer) {
               reconnectBannerTimer = setTimeout(function () {
@@ -508,8 +510,8 @@
             // onJoined() is idempotent (guarded by `joined` flag); calling it here
             // handles the rare case where the SDK fires Connected before onSessionJoined.
             onJoined();
-            // Only forward Connected to the shell when it follows a real disruption (not a silent
-            // failover), to avoid flooding native logs with Connected/Reconnecting pairs.
+            // Forward recovery transitions as well; they are useful when diagnosing
+            // devices that repeatedly lose and restore the Zoom connection.
             post('connection', { state: state });
           } else if (state === 'Fail') {
             if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
@@ -611,7 +613,7 @@
           addDiagnosticListener('active-media-failed', function (event) {
             return {
               mediaType: ['audio', 'video', 'sharing'].indexOf(event.type) >= 0 ? event.type : null,
-              code: Number.isFinite(Number(event.code)) ? Number(event.code) : null,
+              code: typeof event.code === 'number' && Number.isFinite(event.code) ? event.code : null,
             };
           });
           addDiagnosticListener('device-permission-change', function (event) {
@@ -623,7 +625,7 @@
           addDiagnosticListener('network-quality-change', function (event) {
             return {
               direction: ['uplink', 'downlink'].indexOf(event.type) >= 0 ? event.type : null,
-              level: Number.isFinite(Number(event.level)) ? Number(event.level) : null,
+              level: typeof event.level === 'number' && Number.isFinite(event.level) ? event.level : null,
             };
           });
           addDiagnosticListener('auto-play-audio-failed', function () { return {}; });
