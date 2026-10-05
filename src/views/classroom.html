@@ -441,7 +441,8 @@
                 document.getElementById('reconnecting').classList.add('visible');
               }, 2000);
             }
-            post('connection', { state: state });
+            console.warn('[Classroom connection] Zoom reconnecting', { reason: event.reason || null });
+            post('connection', { state: state, reason: event.reason || null });
           } else if (state === 'Connected') {
             // Cancel any pending banner and hide it immediately on recovery.
             if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
@@ -449,7 +450,7 @@
             // onJoined() is idempotent (guarded by `joined` flag); calling it here
             // handles the rare case where the SDK fires Connected before onSessionJoined.
             onJoined();
-            post('connection', { state: state });
+            post('connection', { state: state, reason: event.reason || null });
           } else if (state === 'Fail') {
             if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
             document.getElementById('reconnecting').classList.remove('visible');
@@ -457,7 +458,7 @@
               errorCode: event.errorCode,
               reason: event.reason,
             });
-            post('connection', { state: state, errorCode: event.errorCode });
+            post('connection', { state: state, reason: event.reason || null, errorCode: event.errorCode || null });
             removeConnectionListener();
             // Error 200 is SESSION_FETCH_INFO_ERROR, not proof the host ended the class.
             // Keep it recoverable and show the code-specific join guidance instead.
