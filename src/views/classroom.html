@@ -382,6 +382,12 @@
       if (/permission|denied|notallowed/i.test(r)) return 'Camera/microphone permission was blocked. Allow access and try again.';
       return 'Could not join the class. Please try again.';
     }
+    function isReconnectInterruption(err) {
+      if (!err) return false;
+      var details = [err.type, err.name, err.reason, err.message, err.errorMessage].join(' ');
+      return /RECONNECTING_MEETING|CLIENT_SESSION_STATE_RECONNECTING/i.test(details) ||
+        Number(err.errorCode || err.code) === 5003;
+    }
 
     (async function main() {
       var p = parseHash();
@@ -402,6 +408,18 @@
         var closedSent = false;
         var joined = false;
         var connectionListenerAttached = false;
+        var joinTimeoutExtendedForReconnect = false;
+        function extendJoinTimeoutForReconnect() {
+          if (joined || joinTimeoutExtendedForReconnect) return;
+          joinTimeoutExtendedForReconnect = true;
+          if (joinTimer) clearTimeout(joinTimer);
+          // Zoom keeps attempting recovery for a short period. Allow that recovery to finish
+          // instead of treating the initial 45-second join watchdog as a terminal failure.
+          joinTimer = setTimeout(function () {
+            joinTimer = null;
+            if (!joined) showError('Zoom could not reconnect. Check your network and try joining again.');
+          }, 180000);
+        }
         var connectionListener = function (event) {
           var state = event && event.state;
           if (!state) return;
@@ -410,6 +428,7 @@
           // does so and let the native shell show the transient state instead of treating it as a
           // new join or a completed class.
           if (state === 'Reconnecting') {
+            extendJoinTimeoutForReconnect();
             // Debounce the banner: only show it if the reconnect lasts > 2 s.
             // Transient blips (common on mobile/low-signal devices) resolve before the
             // timer fires, so the user never sees a flash.
@@ -453,6 +472,9 @@
           joined = true;
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
           hide('loading');
+          hide('error');
+          if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
+          document.getElementById('reconnecting').classList.remove('visible');
           post('joined', { isHost: isHost });
         }
         function onClosed() {
@@ -526,6 +548,11 @@
         Promise.resolve(joinResult).then(function () {
           onJoined();
         }).catch(function (err) {
+          if (isReconnectInterruption(err)) {
+            console.info('[Classroom join] Zoom interrupted the join while reconnecting; waiting for recovery.');
+            extendJoinTimeoutForReconnect();
+            return;
+          }
           console.error('[Classroom join]', err);
           showError(friendly(err));
         });
