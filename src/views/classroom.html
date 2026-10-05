@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -338,6 +338,7 @@
       if (window.parent !== window) window.parent.postMessage(payload, '*');
     }
     var joinTimer = null;
+    var reconnectBannerTimer = null;
     function hide(id) { document.getElementById(id).classList.add('hidden'); }
     function show(id) { document.getElementById(id).classList.remove('hidden'); }
     function setStatus(m) { document.getElementById('status-msg').textContent = m; }
@@ -409,13 +410,26 @@
           // does so and let the native shell show the transient state instead of treating it as a
           // new join or a completed class.
           if (state === 'Reconnecting') {
-            document.getElementById('reconnecting').classList.add('visible');
+            // Debounce the banner: only show it if the reconnect lasts > 2 s.
+            // Transient blips (common on mobile/low-signal devices) resolve before the
+            // timer fires, so the user never sees a flash.
+            if (!reconnectBannerTimer) {
+              reconnectBannerTimer = setTimeout(function () {
+                reconnectBannerTimer = null;
+                document.getElementById('reconnecting').classList.add('visible');
+              }, 2000);
+            }
             post('connection', { state: state });
           } else if (state === 'Connected') {
+            // Cancel any pending banner and hide it immediately on recovery.
+            if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
             document.getElementById('reconnecting').classList.remove('visible');
+            // onJoined() is idempotent (guarded by `joined` flag); calling it here
+            // handles the rare case where the SDK fires Connected before onSessionJoined.
             onJoined();
             post('connection', { state: state });
           } else if (state === 'Fail') {
+            if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
             document.getElementById('reconnecting').classList.remove('visible');
             console.warn('[Classroom connection] Zoom connection failed', {
               errorCode: event.errorCode,
@@ -445,6 +459,7 @@
           if (closedSent) return;
           closedSent = true;
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
+          if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
           removeConnectionListener();
           document.getElementById('reconnecting').classList.remove('visible');
           try { uitoolkit.closeSession(container); } catch (e) { }
@@ -493,18 +508,23 @@
         var joinResult = uitoolkit.joinSession(container, config);
         uitoolkit.onSessionJoined(onJoined);
         uitoolkit.onSessionClosed(onClosed);
-        // The toolkit's promise is the authoritative successful join result. Use it as a fallback
-        // in case the UI event fires before its handler is attached by a particular toolkit build.
+
+        // Attach the connection-change listener immediately after joinSession so that
+        // Reconnecting/Connected events are never missed, even during the async join.
+        if (typeof uitoolkit.on === 'function') {
+          try {
+            uitoolkit.on('connection-change', connectionListener);
+            connectionListenerAttached = true;
+          } catch (err) {
+            console.warn('[Classroom connection] Could not attach Zoom connection listener', err);
+          }
+        }
+
+        // The toolkit's promise is the authoritative successful join result. Use it as a
+        // fallback in case the UI event fires before its handler is attached by a
+        // particular toolkit build.
         Promise.resolve(joinResult).then(function () {
           onJoined();
-          if (typeof uitoolkit.on === 'function') {
-            try {
-              uitoolkit.on('connection-change', connectionListener);
-              connectionListenerAttached = true;
-            } catch (err) {
-              console.warn('[Classroom connection] Could not attach Zoom connection listener', err);
-            }
-          }
         }).catch(function (err) {
           console.error('[Classroom join]', err);
           showError(friendly(err));
