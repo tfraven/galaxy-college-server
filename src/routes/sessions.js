@@ -150,7 +150,12 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
   if (session.status !== 2) return fail(res, 400, 'This class is not live right now.');
 
   const sessionName = sessionNameFor(session.id);
-  const { token, expiresAt } = generateVideoSdkToken({ sessionName, isHost, userIdentity: `user_${req.user.id}` });
+  const instanceSuffix = Math.random().toString(36).slice(2, 7);
+  const { token, expiresAt } = generateVideoSdkToken({
+    sessionName,
+    isHost,
+    userIdentity: `u_${req.user.id}_${instanceSuffix}`,
+  });
 
   res.json({
     success: true,

@@ -441,6 +441,9 @@
         var joined = false;
         var connectionListenerAttached = false;
         var diagnosticListeners = [];
+        var connectionEventCount = 0;
+        var reconnectCount = 0;
+        var reconnectStartedAt = null;
         var networkInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
         var onOnline = function () { logPageDiagnostic('browser-online'); };
         var onOffline = function () { logPageDiagnostic('browser-offline'); };
@@ -518,9 +521,12 @@
         var connectionListener = function (event) {
           var state = event && event.state;
           if (!state) return;
+          connectionEventCount += 1;
 
           if (state === 'Reconnecting') {
             var reason = event.reason || null;
+            reconnectCount += 1;
+            if (reconnectStartedAt === null) reconnectStartedAt = Date.now();
             // Zoom also reports failover as Reconnecting; media is unavailable until
             // recovery, so keep the in-meeting UI honest and show a delayed banner.
             extendJoinTimeoutForReconnect();
@@ -531,8 +537,18 @@
               }, 2000);
             }
             console.info('[Classroom connection] Zoom reconnecting', { reason: reason });
-            post('connection', { state: state, reason: reason });
+            post('connection', {
+              state: state,
+              reason: reason,
+              phase: joined ? 'joined' : 'joining',
+              eventNumber: connectionEventCount,
+              reconnectCount: reconnectCount,
+            });
           } else if (state === 'Connected') {
+            var recoveredAfterMs = reconnectStartedAt === null
+              ? null
+              : Math.max(0, Date.now() - reconnectStartedAt);
+            reconnectStartedAt = null;
             // Cancel any pending banner and hide it immediately on recovery.
             if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
             document.getElementById('reconnecting').classList.remove('visible');
@@ -541,7 +557,18 @@
             onJoined();
             // Forward recovery transitions as well; they are useful when diagnosing
             // devices that repeatedly lose and restore the Zoom connection.
-            post('connection', { state: state });
+            post('connection', {
+              state: state,
+              phase: joined ? 'joined' : 'joining',
+              eventNumber: connectionEventCount,
+              reconnectCount: reconnectCount,
+              recoveredAfterMs: recoveredAfterMs,
+            });
+          } else if (state === 'Closed') {
+            // The toolkit also emits onSessionClosed, but handle the documented
+            // connection state directly so this page cannot remain visually active
+            // if one of the two callbacks is missed on a particular WebView.
+            onClosed();
           } else if (state === 'Fail') {
             if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
             document.getElementById('reconnecting').classList.remove('visible');
@@ -549,7 +576,14 @@
               errorCode: event.errorCode,
               reason: event.reason,
             });
-            post('connection', { state: state, reason: event.reason || null, errorCode: event.errorCode || null });
+            post('connection', {
+              state: state,
+              reason: event.reason || null,
+              errorCode: event.errorCode || null,
+              phase: joined ? 'joined' : 'joining',
+              eventNumber: connectionEventCount,
+              reconnectCount: reconnectCount,
+            });
             removeConnectionListener();
             removeDiagnosticListeners();
             // Error 200 is SESSION_FETCH_INFO_ERROR, not proof the host ended the class.
