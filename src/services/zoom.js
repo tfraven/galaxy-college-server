@@ -63,13 +63,15 @@ export const generateVideoSdkToken = ({ sessionName, isHost, userIdentity, durat
       tpc: sessionName,
       role_type: isHost ? 1 : 0,
       user_identity: String(userIdentity),
-      session_key: sessionName,
+      // session_key is a Zoom *password* field — omit it unless you intentionally
+      // want a password-protected session. Including it causes Zoom to reject joiners
+      // that don't supply the matching password and triggers endless RECONNECTING_MEETING.
       version: 1,
       iat,
       exp,
     },
     config.zoom.sdkSecret,
-    { algorithm: 'HS256' }
+    { algorithm: 'HS256', noTimestamp: true }
   );
 
   return { token, expiresAt: new Date(exp * 1000).toISOString() };
