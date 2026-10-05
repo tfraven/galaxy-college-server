@@ -33,6 +33,27 @@
       background: radial-gradient(ellipse at 50% 0%, rgba(56, 189, 248, .08), transparent 48%), #0b1220;
     }
 
+    #reconnecting {
+      position: fixed;
+      top: max(14px, env(safe-area-inset-top));
+      left: 50%;
+      z-index: 9000;
+      display: none;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 15px;
+      color: #e2e8f0;
+      border: 1px solid rgba(125, 211, 252, .24);
+      border-radius: 999px;
+      background: rgba(15, 23, 42, .96);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, .32);
+      font-size: 13px;
+      transform: translateX(-50%);
+    }
+
+    #reconnecting.visible { display: flex; }
+    #reconnecting .spinner { width: 15px; height: 15px; border-width: 2px; margin: 0; }
+
     .state-screen {
       position: fixed;
       inset: 0;
@@ -240,6 +261,10 @@
 
 <body>
   <div id="session"></div>
+  <div id="reconnecting" role="status" aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span>
+    Reconnecting to your class…
+  </div>
 
   <div id="loading" class="state-screen" role="status" aria-live="polite">
     <section class="state-card">
@@ -375,6 +400,40 @@
         var container = document.getElementById('session');
         var closedSent = false;
         var joined = false;
+        var connectionListenerAttached = false;
+        var connectionListener = function (event) {
+          var state = event && event.state;
+          if (!state) return;
+
+          // The Video SDK performs its own failover/reconnect. Keep the WebView mounted while it
+          // does so and let the native shell show the transient state instead of treating it as a
+          // new join or a completed class.
+          if (state === 'Reconnecting') {
+            document.getElementById('reconnecting').classList.add('visible');
+            post('connection', { state: state });
+          } else if (state === 'Connected') {
+            document.getElementById('reconnecting').classList.remove('visible');
+            onJoined();
+            post('connection', { state: state });
+          } else if (state === 'Fail') {
+            document.getElementById('reconnecting').classList.remove('visible');
+            console.warn('[Classroom connection] Zoom connection failed', {
+              errorCode: event.errorCode,
+              reason: event.reason,
+            });
+            post('connection', { state: state, errorCode: event.errorCode });
+            removeConnectionListener();
+            showError(event.errorCode
+              ? 'The Zoom connection could not recover (error ' + event.errorCode + '). Rejoin the class.'
+              : 'The Zoom connection could not recover. Rejoin the class.');
+          }
+          // Closed is handled by onSessionClosed, which is also emitted for a normal leave.
+        };
+        function removeConnectionListener() {
+          if (!connectionListenerAttached) return;
+          try { uitoolkit.off('connection-change', connectionListener); } catch (e) { }
+          connectionListenerAttached = false;
+        }
         function onJoined() {
           if (joined || closedSent) return;
           joined = true;
@@ -386,6 +445,8 @@
           if (closedSent) return;
           closedSent = true;
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
+          removeConnectionListener();
+          document.getElementById('reconnecting').classList.remove('visible');
           try { uitoolkit.closeSession(container); } catch (e) { }
           post('closed', { isHost: isHost });
           hide('loading');
@@ -432,14 +493,25 @@
         var joinResult = uitoolkit.joinSession(container, config);
         uitoolkit.onSessionJoined(onJoined);
         uitoolkit.onSessionClosed(onClosed);
-        // joinSession also opens the teacher's device preview, which must stay interactive.
-        hide('loading');
-        post('ready', { isHost: isHost });
-        Promise.resolve(joinResult).catch(function (err) {
+        // The toolkit's promise is the authoritative successful join result. Use it as a fallback
+        // in case the UI event fires before its handler is attached by a particular toolkit build.
+        Promise.resolve(joinResult).then(function () {
+          onJoined();
+          if (typeof uitoolkit.on === 'function') {
+            try {
+              uitoolkit.on('connection-change', connectionListener);
+              connectionListenerAttached = true;
+            } catch (err) {
+              console.warn('[Classroom connection] Could not attach Zoom connection listener', err);
+            }
+          }
+        }).catch(function (err) {
           console.error('[Classroom join]', err);
           showError(friendly(err));
         });
-
+        // joinSession also opens the teacher's device preview, which must stay interactive.
+        hide('loading');
+        post('ready', { isHost: isHost });
       } catch (err) {
         console.error('[Classroom]', err);
         showError(friendly(err));
