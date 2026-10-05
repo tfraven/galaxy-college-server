@@ -411,7 +411,47 @@
         var closedSent = false;
         var joined = false;
         var connectionListenerAttached = false;
+        var diagnosticListeners = [];
+        var onOnline = function () { logPageDiagnostic('browser-online'); };
+        var onOffline = function () { logPageDiagnostic('browser-offline'); };
+        var onVisibilityChange = function () { logPageDiagnostic('visibility-change'); };
         var joinTimeoutExtendedForReconnect = false;
+        function logPageDiagnostic(eventName) {
+          var details = {
+            event: eventName,
+            online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
+            visibility: document.visibilityState || null,
+          };
+          console.warn('[Classroom diagnostic]', details);
+          post('diagnostic', details);
+        }
+        function addDiagnosticListener(eventName, normalize) {
+          if (typeof uitoolkit.on !== 'function') return;
+          var listener = function (event) {
+            try {
+              var details = normalize(event || {});
+              post('diagnostic', Object.assign({ event: eventName }, details));
+            } catch (e) { }
+          };
+          try {
+            uitoolkit.on(eventName, listener);
+            diagnosticListeners.push({ eventName: eventName, listener: listener });
+          } catch (e) {
+            console.info('[Classroom diagnostic] Listener unavailable', eventName);
+          }
+        }
+        function removeDiagnosticListeners() {
+          diagnosticListeners.forEach(function (item) {
+            try { uitoolkit.off(item.eventName, item.listener); } catch (e) { }
+          });
+          diagnosticListeners = [];
+          window.removeEventListener('online', onOnline);
+          window.removeEventListener('offline', onOffline);
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+        }
+        window.addEventListener('online', onOnline);
+        window.addEventListener('offline', onOffline);
+        document.addEventListener('visibilitychange', onVisibilityChange);
         function extendJoinTimeoutForReconnect() {
           if (joined || joinTimeoutExtendedForReconnect) return;
           joinTimeoutExtendedForReconnect = true;
@@ -467,6 +507,7 @@
             });
             post('connection', { state: state, reason: event.reason || null, errorCode: event.errorCode || null });
             removeConnectionListener();
+            removeDiagnosticListeners();
             // Error 200 is SESSION_FETCH_INFO_ERROR, not proof the host ended the class.
             // Keep it recoverable and show the code-specific join guidance instead.
             showError(friendly({ errorCode: event.errorCode, reason: event.reason }));
@@ -494,6 +535,7 @@
           if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
           if (reconnectBannerTimer) { clearTimeout(reconnectBannerTimer); reconnectBannerTimer = null; }
           removeConnectionListener();
+          removeDiagnosticListeners();
           document.getElementById('reconnecting').classList.remove('visible');
           try { uitoolkit.closeSession(container); } catch (e) { }
           post('closed', { isHost: isHost });
@@ -551,6 +593,27 @@
           } catch (err) {
             console.warn('[Classroom connection] Could not attach Zoom connection listener', err);
           }
+          // These SDK events distinguish connection loss from a device/audio failure.
+          // Forward only stable diagnostic fields; never include identities or session data.
+          addDiagnosticListener('active-media-failed', function (event) {
+            return {
+              mediaType: ['audio', 'video', 'sharing'].indexOf(event.type) >= 0 ? event.type : null,
+              code: Number.isFinite(Number(event.code)) ? Number(event.code) : null,
+            };
+          });
+          addDiagnosticListener('device-permission-change', function (event) {
+            return {
+              device: ['microphone', 'camera'].indexOf(event.name) >= 0 ? event.name : null,
+              permission: ['granted', 'denied', 'prompt'].indexOf(event.state) >= 0 ? event.state : null,
+            };
+          });
+          addDiagnosticListener('network-quality-change', function (event) {
+            return {
+              direction: ['uplink', 'downlink'].indexOf(event.type) >= 0 ? event.type : null,
+              level: Number.isFinite(Number(event.level)) ? Number(event.level) : null,
+            };
+          });
+          addDiagnosticListener('auto-play-audio-failed', function () { return {}; });
         }
 
         // The toolkit's promise is the authoritative successful join result. Use it as a
