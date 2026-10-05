@@ -71,7 +71,9 @@ export const generateVideoSdkToken = ({ sessionName, isHost, userIdentity, durat
       exp,
     },
     config.zoom.sdkSecret,
-    { algorithm: 'HS256', noTimestamp: true }
+    // Do not set jsonwebtoken's `noTimestamp`: it removes the explicitly supplied `iat` claim.
+    // Zoom requires `iat` for Video SDK JWTs; omitting it can surface as SESSION_FETCH_INFO_ERROR (200).
+    { algorithm: 'HS256' }
   );
 
   return { token, expiresAt: new Date(exp * 1000).toISOString() };

@@ -371,6 +371,9 @@
     }
     function friendly(err) {
       var r = String((err && (err.reason || err.message || err.errorMessage)) || err || '');
+      if (Number(err && (err.errorCode || err.code)) === 200) {
+        return 'Zoom could not retrieve this class session (error 200). Go back and rejoin. If it happens again, contact support.';
+      }
       if (/sdk-load/.test(r)) return 'Could not load the Zoom classroom (version ' + UIKIT_VERSION + '). Check your connection and try again.';
       if (/SESSION_FETCH_INFO_ERROR|verify jwt failed|account does not exist or does not belong to you/i.test(r)) {
         return 'Zoom rejected this session token. The server must use Video SDK SDK credentials; OAuth Client ID/Secret and webhook tokens cannot authorize class sessions.';
@@ -456,9 +459,9 @@
             });
             post('connection', { state: state, errorCode: event.errorCode });
             removeConnectionListener();
-            showError(event.errorCode
-              ? 'The Zoom connection could not recover (error ' + event.errorCode + '). Rejoin the class.'
-              : 'The Zoom connection could not recover. Rejoin the class.');
+            // Error 200 is SESSION_FETCH_INFO_ERROR, not proof the host ended the class.
+            // Keep it recoverable and show the code-specific join guidance instead.
+            showError(friendly({ errorCode: event.errorCode, reason: event.reason }));
           }
           // Closed is handled by onSessionClosed, which is also emitted for a normal leave.
         };
