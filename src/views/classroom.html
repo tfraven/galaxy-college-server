@@ -417,10 +417,22 @@
         var onVisibilityChange = function () { logPageDiagnostic('visibility-change'); };
         var joinTimeoutExtendedForReconnect = false;
         function logPageDiagnostic(eventName) {
+          var userAgent = String(navigator.userAgent || '');
+          var androidMatch = userAgent.match(/Android\s+([\d.]+)/i);
+          var webViewMatch = userAgent.match(/(?:Chrome|Chromium)\/([\d.]+)/i);
+          var network = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
           var details = {
             event: eventName,
             online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
             visibility: document.visibilityState || null,
+            androidVersion: androidMatch ? androidMatch[1] : null,
+            webViewVersion: webViewMatch ? webViewMatch[1] : null,
+            embeddedWebView: /;\s*wv\)/i.test(userAgent) || /Version\/4\.0/i.test(userAgent),
+            effectiveType: network && typeof network.effectiveType === 'string' ? network.effectiveType : null,
+            networkRttMs: network && Number.isFinite(Number(network.rtt)) ? Math.round(Number(network.rtt)) : null,
+            networkDownlinkMbps: network && Number.isFinite(Number(network.downlink))
+              ? Math.round(Number(network.downlink) * 10) / 10
+              : null,
           };
           console.warn('[Classroom diagnostic]', details);
           post('diagnostic', details);
@@ -452,6 +464,7 @@
         window.addEventListener('online', onOnline);
         window.addEventListener('offline', onOffline);
         document.addEventListener('visibilitychange', onVisibilityChange);
+        logPageDiagnostic('runtime-context');
         function extendJoinTimeoutForReconnect() {
           if (joined || joinTimeoutExtendedForReconnect) return;
           joinTimeoutExtendedForReconnect = true;
