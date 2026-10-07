@@ -139,3 +139,41 @@ studentsRouter.post('/commit-bulk', requireRole(ROLE.ADMIN), asyncHandler(async 
 
   res.json({ success: true, data: { importedCount: rows.length, credentials } });
 }));
+
+studentsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const { fullName, phone, classId, sectionId } = req.body || {};
+  if (id === null) return fail(res, 400, 'Invalid student id');
+
+  if (fullName !== undefined) {
+    await sql`UPDATE users SET full_name = ${fullName.trim()}, phone = ${phone || null} WHERE id = ${id}`;
+  }
+  if (classId) {
+    await sql`
+      UPDATE students
+      SET class_id = ${classId},
+          section_id = ${sectionId ? toInt(sectionId) : null}
+      WHERE user_id = ${id}
+    `;
+  }
+
+  const [student] = await sql`
+    SELECT s.user_id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", u.phone,
+           s.class_id AS "classId", c.name AS "className",
+           s.section_id AS "sectionId", sec.name AS "sectionName", u.is_active AS "isActive"
+    FROM students s
+    JOIN users u ON s.user_id = u.id
+    JOIN classes c ON s.class_id = c.id
+    LEFT JOIN sections sec ON s.section_id = sec.id
+    WHERE s.user_id = ${id}
+  `;
+  if (!student) return fail(res, 404, 'Student not found');
+  res.json({ success: true, data: student });
+}));
+
+studentsRouter.delete('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (id === null) return fail(res, 400, 'Invalid student id');
+  await sql`UPDATE users SET is_active = FALSE WHERE id = ${id}`;
+  res.json({ success: true, data: { id, deleted: true } });
+}));

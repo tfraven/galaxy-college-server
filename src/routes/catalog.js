@@ -47,3 +47,76 @@ catalogRouter.post('/questions', asyncHandler(async (req, res) => {
   `;
   res.status(201).json({ success: true, data: q });
 }));
+
+catalogRouter.put('/questions/:id', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const { topic, body, image, optA, optB, optC, optD, correct, explanation, courseId } = req.body || {};
+  if (!body?.trim() || !optA?.trim() || !optB?.trim() || !optC?.trim() || !optD?.trim() || !correct) {
+    return fail(res, 400, 'All 4 options, question body, and correct answer are required');
+  }
+  const upper = String(correct).toUpperCase();
+  if (!['A', 'B', 'C', 'D'].includes(upper)) return fail(res, 400, 'Correct option must be A, B, C, or D');
+
+  const [existing] = await sql`SELECT course_id FROM questions WHERE id = ${id}`;
+  if (!existing) return fail(res, 404, 'Question not found');
+  if (!(await canManageCourse(req.user, existing.course_id))) return fail(res, 403, 'Not your course.');
+
+  const [q] = await sql`
+    UPDATE questions
+    SET topic = ${topic || null},
+        body = ${body.trim()},
+        image = ${image || null},
+        opt_a = ${optA.trim()},
+        opt_b = ${optB.trim()},
+        opt_c = ${optC.trim()},
+        opt_d = ${optD.trim()},
+        correct = ${upper},
+        explanation = ${explanation || null},
+        course_id = ${courseId ? toInt(courseId) : existing.course_id}
+    WHERE id = ${id}
+    RETURNING id, course_id AS "courseId", topic, body, image,
+              opt_a AS "optA", opt_b AS "optB", opt_c AS "optC", opt_d AS "optD",
+              correct, explanation, is_active AS "isActive", created_by AS "createdBy", created_at AS "createdAt"
+  `;
+  res.json({ success: true, data: q });
+}));
+
+catalogRouter.delete('/questions/:id', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [existing] = await sql`SELECT course_id FROM questions WHERE id = ${id}`;
+  if (!existing) return fail(res, 404, 'Question not found');
+  if (!(await canManageCourse(req.user, existing.course_id))) return fail(res, 403, 'Not your course.');
+
+  await sql`UPDATE questions SET is_active = FALSE WHERE id = ${id}`;
+  res.json({ success: true, data: { id, deleted: true } });
+}));
+
+catalogRouter.post('/questions/bulk', asyncHandler(async (req, res) => {
+  const { courseId, questions = [] } = req.body || {};
+  if (!courseId || !Array.isArray(questions) || questions.length === 0) {
+    return fail(res, 400, 'courseId and non-empty questions array are required');
+  }
+  if (!(await canManageCourse(req.user, courseId))) return fail(res, 403, 'Not your course.');
+
+  const inserted = [];
+  for (const item of questions) {
+    const { topic, body, image, optA, optB, optC, optD, correct, explanation } = item;
+    if (body?.trim() && optA?.trim() && optB?.trim() && optC?.trim() && optD?.trim() && correct) {
+      const upper = String(correct).toUpperCase();
+      if (['A', 'B', 'C', 'D'].includes(upper)) {
+        const [q] = await sql`
+          INSERT INTO questions (course_id, topic, body, image, opt_a, opt_b, opt_c, opt_d, correct, explanation, created_by)
+          VALUES (${courseId}, ${topic || null}, ${body.trim()}, ${image || null},
+                  ${optA.trim()}, ${optB.trim()}, ${optC.trim()}, ${optD.trim()},
+                  ${upper}, ${explanation || null}, ${req.user.id})
+          RETURNING id, course_id AS "courseId", topic, body, image,
+                    opt_a AS "optA", opt_b AS "optB", opt_c AS "optC", opt_d AS "optD",
+                    correct, explanation, is_active AS "isActive", created_by AS "createdBy", created_at AS "createdAt"
+        `;
+        inserted.push(q);
+      }
+    }
+  }
+
+  res.status(201).json({ success: true, data: { count: inserted.length, questions: inserted } });
+}));

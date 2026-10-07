@@ -187,3 +187,149 @@ testsRouter.get('/:id/document', requireRole(...STAFF_ROLES), asyncHandler(async
     },
   });
 }));
+
+// Update Test (staff / admin)
+testsRouter.put('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [test] = await sql`SELECT * FROM tests WHERE id = ${id}`;
+  if (!test) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
+
+  const {
+    title, durationMin, markPerQ, negMark, shuffleQ, shuffleOpt,
+    startAt, endAt, resultMode, sectionId, questionIds
+  } = req.body || {};
+
+  const updatedTitle = title !== undefined ? title.trim() : test.title;
+  const updatedDuration = durationMin !== undefined ? parseInt(durationMin, 10) : test.duration_min;
+  const updatedMark = markPerQ !== undefined ? parseFloat(markPerQ) : parseFloat(test.mark_per_q);
+  const updatedNeg = negMark !== undefined ? parseFloat(negMark) : parseFloat(test.neg_mark);
+  const updatedShuffleQ = shuffleQ !== undefined ? Boolean(shuffleQ) : test.shuffle_q;
+  const updatedShuffleOpt = shuffleOpt !== undefined ? Boolean(shuffleOpt) : test.shuffle_opt;
+  const updatedStart = startAt ? new Date(startAt).toISOString() : test.start_at;
+  const updatedEnd = endAt ? new Date(endAt).toISOString() : test.end_at;
+  const updatedResultMode = resultMode !== undefined ? parseInt(resultMode, 10) : test.result_mode;
+  const updatedSectionId = sectionId !== undefined ? (sectionId ? toInt(sectionId) : null) : test.section_id;
+
+  await sql`
+    UPDATE tests
+    SET title = ${updatedTitle},
+        duration_min = ${updatedDuration},
+        mark_per_q = ${updatedMark},
+        neg_mark = ${updatedNeg},
+        shuffle_q = ${updatedShuffleQ},
+        shuffle_opt = ${updatedShuffleOpt},
+        start_at = ${updatedStart},
+        end_at = ${updatedEnd},
+        result_mode = ${updatedResultMode},
+        section_id = ${updatedSectionId}
+    WHERE id = ${id}
+  `;
+
+  if (Array.isArray(questionIds) && questionIds.length > 0) {
+    const qIds = [...new Set(questionIds.map(toInt))].filter((n) => n !== null);
+    await sql.transaction([
+      sql`DELETE FROM test_questions WHERE test_id = ${id}`,
+      sql`
+        INSERT INTO test_questions (test_id, question_id)
+        SELECT ${id}, q FROM unnest(${qIds}::int[]) AS q
+      `
+    ]);
+  }
+
+  const [row] = await fetchTests({ testId: id });
+  res.json({ success: true, data: toDto(row) });
+}));
+
+// Delete Test (if no attempts or in draft)
+testsRouter.delete('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [test] = await sql`SELECT * FROM tests WHERE id = ${id}`;
+  if (!test) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
+
+  const attempts = await sql`SELECT COUNT(*)::int AS count FROM attempts WHERE test_id = ${id}`;
+  if (attempts[0]?.count > 0 && test.status !== 1) {
+    return fail(res, 400, 'Cannot delete an exam with active student attempts. You can close it instead.');
+  }
+
+  await sql.transaction([
+    sql`DELETE FROM test_questions WHERE test_id = ${id}`,
+    sql`DELETE FROM attempts WHERE test_id = ${id}`,
+    sql`DELETE FROM tests WHERE id = ${id}`,
+  ]);
+
+  res.json({ success: true, data: { id, deleted: true } });
+}));
+
+// Analytics for test (per-question breakdown, pass rates, score distribution)
+testsRouter.get('/:id/analytics', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [test] = await sql`SELECT * FROM tests WHERE id = ${id}`;
+  if (!test) return fail(res, 404, 'Test not found');
+  if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
+
+  const attempts = await sql`
+    SELECT a.*, u.full_name AS student_name, u.username AS roll_no
+    FROM attempts a
+    JOIN users u ON a.student_id = u.id
+    WHERE a.test_id = ${id}
+  `;
+
+  const totalAttempts = attempts.length;
+  const submitted = attempts.filter((a) => a.submitted_at);
+  const scores = submitted.map((a) => parseFloat(a.score) || 0);
+
+  const avgScore = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 0;
+  const maxScore = scores.length ? Math.max(...scores) : 0;
+  const minScore = scores.length ? Math.min(...scores) : 0;
+
+  // Question level breakdown
+  const questions = await sql`
+    SELECT q.id, q.body, q.topic, q.correct, q.opt_a, q.opt_b, q.opt_c, q.opt_d
+    FROM questions q
+    JOIN test_questions tq ON q.id = tq.question_id
+    WHERE tq.test_id = ${id}
+    ORDER BY q.id ASC
+  `;
+
+  const answers = await sql`
+    SELECT aa.question_id, aa.chosen
+    FROM attempt_answers aa
+    JOIN attempts a ON aa.attempt_id = a.id
+    WHERE a.test_id = ${id} AND a.submitted_at IS NOT NULL
+  `;
+
+  const qStats = questions.map((q) => {
+    const qAnswers = answers.filter((a) => a.question_id === q.id);
+    const totalAns = qAnswers.length;
+    const aCount = qAnswers.filter((a) => a.chosen === 'A').length;
+    const bCount = qAnswers.filter((a) => a.chosen === 'B').length;
+    const cCount = qAnswers.filter((a) => a.chosen === 'C').length;
+    const dCount = qAnswers.filter((a) => a.chosen === 'D').length;
+    const correctCount = qAnswers.filter((a) => a.chosen === q.correct).length;
+    const accuracy = totalAns > 0 ? Math.round((correctCount / totalAns) * 100) : 0;
+
+    return {
+      questionId: q.id,
+      body: q.body,
+      topic: q.topic,
+      correct: q.correct,
+      totalResponses: totalAns,
+      breakdown: { A: aCount, B: bCount, C: cCount, D: dCount },
+      accuracy,
+    };
+  });
+
+  res.json({
+    success: true,
+    data: {
+      totalAttempts,
+      submittedCount: submitted.length,
+      averageScore: Number(avgScore),
+      maxScore: Number(maxScore),
+      minScore: Number(minScore),
+      questionAnalytics: qStats,
+    },
+  });
+}));

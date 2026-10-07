@@ -71,3 +71,36 @@ staffRouter.put('/:id/courses', asyncHandler(async (req, res) => {
   ]);
   res.json({ success: true });
 }));
+
+staffRouter.put('/:id', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const { fullName, phone, role } = req.body || {};
+  if (id === null) return fail(res, 400, 'Invalid staff id');
+
+  const updates = [];
+  if (fullName?.trim()) {
+    await sql`UPDATE users SET full_name = ${fullName.trim()} WHERE id = ${id}`;
+  }
+  if (phone !== undefined) {
+    await sql`UPDATE users SET phone = ${phone || null} WHERE id = ${id}`;
+  }
+  if (role && [2, 3].includes(toInt(role))) {
+    await sql`UPDATE users SET role = ${toInt(role)} WHERE id = ${id}`;
+  }
+
+  const [u] = await sql`
+    SELECT id, role, username, full_name AS "fullName", phone,
+           is_active AS "isActive", must_change_pw AS "mustChangePw"
+    FROM users WHERE id = ${id}
+  `;
+  if (!u) return fail(res, 404, 'Staff member not found');
+  res.json({ success: true, data: u });
+}));
+
+staffRouter.delete('/:id', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (id === null) return fail(res, 400, 'Invalid staff id');
+  if (id === req.user.id) return fail(res, 400, 'Cannot deactivate yourself');
+  await sql`UPDATE users SET is_active = FALSE WHERE id = ${id}`;
+  res.json({ success: true, data: { id, deleted: true } });
+}));
