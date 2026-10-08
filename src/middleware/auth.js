@@ -7,7 +7,7 @@ export const STAFF_ROLES = [ROLE.ADMIN, ROLE.OPERATOR, ROLE.TEACHER];
 
 const loadUser = async (id) => {
     const [u] = await sql`
-    SELECT id, role, username, full_name, is_active, must_change_pw, token_version
+    SELECT id, role, username, full_name, is_active, must_change_pw, token_version, active_device_id
     FROM users WHERE id = ${id}
   `;
     return u || null;
@@ -42,6 +42,19 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     if (decoded.ver !== user.token_version) return fail(res, 401, 'Invalid or expired token');
     if (!user.is_active) return fail(res, 403, 'Account is deactivated. Contact Admin.');
 
+    let legacyDeviceId = null;
+    if (user.role === ROLE.STUDENT) {
+        if (typeof decoded.dev === 'string' && decoded.dev) {
+            if (decoded.dev !== user.active_device_id) return fail(res, 401, 'This student account is active on another device.');
+        } else if (user.active_device_id == null && req.baseUrl === '/api/v1/auth' && req.path === '/me') {
+            const candidate = req.get('X-Device-ID') || '';
+            if (!/^[A-Za-z0-9._:-]{16,128}$/.test(candidate)) return fail(res, 401, 'Please sign in again to secure this device.');
+            legacyDeviceId = candidate;
+        } else {
+            return fail(res, 401, 'Please sign in again to secure this device.');
+        }
+    }
+
     const passwordChangeAllowed = req.baseUrl === '/api/v1/auth'
         && ['/me', '/change-password'].includes(req.path);
     if (user.must_change_pw && !passwordChangeAllowed) {
@@ -55,6 +68,8 @@ export const authenticate = asyncHandler(async (req, res, next) => {
         fullName: user.full_name,
         mustChangePw: user.must_change_pw,
         tokenVersion: user.token_version,
+        deviceId: typeof decoded.dev === 'string' ? decoded.dev : legacyDeviceId,
+        legacyDeviceId,
     };
     next();
 });

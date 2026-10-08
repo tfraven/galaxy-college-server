@@ -24,6 +24,8 @@ import { catalogRouter } from './routes/catalog.js';
 import { testsRouter } from './routes/tests.js';
 import { examRouter } from './routes/exam.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { announcementsRouter } from './routes/announcements.js';
+import { notificationsRouter } from './routes/notifications.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, '../public');
@@ -140,6 +142,7 @@ app.use(
       'Authorization',
       'Content-Type',
       'Accept',
+      'X-Device-ID',
     ],
 
     maxAge: 600,
@@ -325,6 +328,10 @@ app.use(
   authenticate,
   sessionsRouter
 );
+
+app.use('/api/v1/announcements', authenticate, announcementsRouter);
+
+app.use('/api/v1/notifications', authenticate, notificationsRouter);
 
 
 /*

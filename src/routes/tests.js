@@ -2,6 +2,7 @@ import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageCourse, getStudentEnrolment } from '../services/access.js';
+import { notifyStudents } from '../services/notifications.js';
 
 export const testsRouter = express.Router();
 
@@ -126,6 +127,15 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
   `;
 
   const [row] = await fetchTests({ testId: id });
+  if (status === 2) {
+    const [course] = await sql`SELECT class_id FROM courses WHERE id = ${courseId}`;
+    await notifyStudents({
+      type: 'exam_published', title: `Exam published: ${row.title}`,
+      body: `${row.courseName} is available from ${new Date(row.startAt).toLocaleString()}.`,
+      relatedType: 'test', relatedId: id, eventKey: `exam_published:${id}`,
+      classId: course.class_id, sectionId: sectionId || null,
+    });
+  }
   res.status(201).json({ success: true, data: toDto(row) });
 }));
 
@@ -145,6 +155,15 @@ testsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async
 
   await sql`UPDATE tests SET status = ${status} WHERE id = ${id}`;
   const [updated] = await fetchTests({ testId: id });
+  if (status === 2 && row.status !== 2) {
+    const [course] = await sql`SELECT class_id FROM courses WHERE id = ${row.course_id}`;
+    await notifyStudents({
+      type: 'exam_published', title: `Exam published: ${updated.title}`,
+      body: `${updated.courseName} is available from ${new Date(updated.start_at).toLocaleString()}.`,
+      relatedType: 'test', relatedId: id, eventKey: `exam_published:${id}`,
+      classId: course.class_id, sectionId: row.section_id,
+    });
+  }
   res.json({ success: true, data: toDto(updated) });
 }));
 

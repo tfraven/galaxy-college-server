@@ -2,6 +2,7 @@ import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, isStaff, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageClass, getStudentEnrolment } from '../services/access.js';
+import { notifyStudents } from '../services/notifications.js';
 import { generateVideoSdkToken, sessionIdFromReference, sessionNameFor, sessionReferenceFor } from '../services/zoom.js';
 
 export const sessionsRouter = express.Router();
@@ -114,6 +115,12 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
     RETURNING id
   `;
   const [row] = await fetchSessions({ id });
+  await notifyStudents({
+    type: 'live_scheduled', title: `Live class scheduled: ${row.title}`,
+    body: `${row.course_name || 'General'} • ${new Date(row.plan_start).toLocaleString()}`,
+    relatedType: 'live_session', relatedId: id, eventKey: `live_scheduled:${id}`,
+    classId: row.class_id, sectionId: row.section_id,
+  });
   res.status(201).json({ success: true, data: toDto(row) });
 }));
 
@@ -134,6 +141,14 @@ sessionsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(as
   else if (status === 3) await sql`UPDATE live_sessions SET status = 3, ended_at = NOW() WHERE id = ${id}`;
 
   const [row] = await fetchSessions({ id });
+  if (status === 2 && access.session.status !== 2) {
+    await notifyStudents({
+      type: 'live_started', title: `Live class is starting: ${row.title}`,
+      body: `${row.course_name || 'General'} is live now.`,
+      relatedType: 'live_session', relatedId: id, eventKey: `live_started:${id}`,
+      classId: row.class_id, sectionId: row.section_id,
+    });
+  }
   res.json({ success: true, data: toDto(row) });
 }));
 

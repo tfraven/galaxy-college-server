@@ -167,7 +167,29 @@ export const initSchema = async () => {
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0
   `;
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS active_device_id TEXT,
+    ADD COLUMN IF NOT EXISTS active_device_label TEXT,
+    ADD COLUMN IF NOT EXISTS device_last_seen_at TIMESTAMPTZ
+  `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username))`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS device_login_requests (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device_id TEXT NOT NULL,
+      device_label TEXT NOT NULL,
+      approval_key_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'superseded')),
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      decided_at TIMESTAMPTZ,
+      approved_token_version INTEGER
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_device_login_requests_pending ON device_login_requests (user_id, requested_at DESC) WHERE status = 'pending'`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS security_migrations (
@@ -213,6 +235,32 @@ export const initSchema = async () => {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS announcements (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('announcement', 'live_scheduled', 'live_started', 'exam_published')),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      related_type TEXT NOT NULL,
+      related_id INTEGER NOT NULL,
+      event_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      read_at TIMESTAMPTZ,
+      UNIQUE (user_id, event_key)
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications (user_id, created_at DESC) WHERE read_at IS NULL`;
 
   // Indexes for the hot paths: auto-submit job, student lists, session lists, question picking.
   await sql`CREATE INDEX IF NOT EXISTS idx_attempts_open ON attempts (deadline_at) WHERE submitted_at IS NULL`;
