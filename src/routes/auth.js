@@ -109,7 +109,7 @@ authRouter.post('/device-login-status', asyncHandler(async (req, res) => {
     return fail(res, 400, 'Invalid device approval request.');
   }
   const keyHash = createHash('sha256').update(approvalKey).digest('hex');
-  const [request] = await sql`
+  await sql`
     UPDATE device_login_requests
     SET status = 'expired'
     WHERE id = ${requestId} AND approval_key_hash = ${keyHash} AND status = 'pending' AND expires_at <= NOW()
@@ -136,7 +136,7 @@ authRouter.post('/device-login-status', asyncHandler(async (req, res) => {
 }));
 
 authRouter.get('/device-login-requests/pending', authenticate, requireRole(ROLE.STUDENT), asyncHandler(async (req, res) => {
-  const data = await sql`
+  await sql`
     UPDATE device_login_requests SET status = 'expired'
     WHERE user_id = ${req.user.id} AND status = 'pending' AND expires_at <= NOW()
   `;
@@ -184,7 +184,8 @@ authRouter.post('/device-login-requests/:id/decision', authenticate, requireRole
       RETURNING r.status
     ), superseded AS (
       UPDATE device_login_requests SET status = 'superseded', decided_at = NOW()
-      WHERE user_id = ${req.user.id} AND status = 'pending' AND ${decision} = 'approve'
+      WHERE user_id = ${req.user.id} AND id <> ${req.params.id} AND status = 'pending' AND ${decision} = 'approve'
+        AND EXISTS (SELECT 1 FROM switched)
       RETURNING id
     )
     SELECT status FROM decided UNION ALL SELECT status FROM denied LIMIT 1
