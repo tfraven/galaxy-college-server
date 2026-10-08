@@ -5,6 +5,25 @@ import { asyncHandler, fail, requireRole, ROLE, toInt } from '../middleware/auth
 export const notificationsRouter = express.Router();
 notificationsRouter.use(requireRole(ROLE.STUDENT));
 
+notificationsRouter.post('/device', asyncHandler(async (req, res) => {
+  const installationId = typeof req.body?.installationId === 'string' ? req.body.installationId.trim() : '';
+  if (installationId.length < 10 || installationId.length > 256) return fail(res, 400, 'Invalid push installation.');
+  if (!req.user.deviceId) return fail(res, 401, 'Sign in again to enable notifications on this device.');
+
+  await sql`
+    INSERT INTO push_installations (installation_id, user_id, device_id, updated_at)
+    VALUES (${installationId}, ${req.user.id}, ${req.user.deviceId}, NOW())
+    ON CONFLICT (installation_id) DO UPDATE
+    SET user_id = EXCLUDED.user_id, device_id = EXCLUDED.device_id, updated_at = NOW()
+  `;
+  await sql`
+    DELETE FROM push_installations
+    WHERE user_id = ${req.user.id} AND device_id = ${req.user.deviceId}
+      AND installation_id <> ${installationId}
+  `;
+  return res.json({ success: true, data: { registered: true } });
+}));
+
 notificationsRouter.get('/', asyncHandler(async (req, res) => {
   const data = await sql`
     SELECT id, type, title, body, related_type AS "relatedType", related_id AS "relatedId",

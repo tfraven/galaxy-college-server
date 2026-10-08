@@ -166,7 +166,11 @@ authRouter.post('/device-login-requests/:id/decision', authenticate, requireRole
         AND u.id = ${req.user.id} AND u.active_device_id = ${req.user.deviceId}
         AND u.token_version = ${req.user.tokenVersion}
         AND ${decision} = 'approve'
-      RETURNING u.id, u.token_version
+      RETURNING u.id, u.token_version, r.device_id
+    ), removed_old_installations AS (
+      DELETE FROM push_installations i USING switched s
+      WHERE i.user_id = s.id AND i.device_id <> s.device_id
+      RETURNING i.installation_id
     ), decided AS (
       UPDATE device_login_requests r
       SET status = CASE WHEN ${decision} = 'approve' THEN 'approved' ELSE 'denied' END,
@@ -196,11 +200,15 @@ authRouter.post('/device-login-requests/:id/decision', authenticate, requireRole
 
 authRouter.post('/logout', authenticate, asyncHandler(async (req, res) => {
   if (req.user.role === ROLE.STUDENT) {
-    await sql`
+    const [loggedOut] = await sql`
       UPDATE users SET active_device_id = NULL, active_device_label = NULL, device_last_seen_at = NULL,
                        token_version = token_version + 1
       WHERE id = ${req.user.id} AND active_device_id = ${req.user.deviceId} AND token_version = ${req.user.tokenVersion}
+      RETURNING id
     `;
+    if (loggedOut) {
+      await sql`DELETE FROM push_installations WHERE user_id = ${req.user.id} AND device_id = ${req.user.deviceId}`;
+    }
   } else {
     await sql`UPDATE users SET token_version = token_version + 1 WHERE id = ${req.user.id} AND token_version = ${req.user.tokenVersion}`;
   }

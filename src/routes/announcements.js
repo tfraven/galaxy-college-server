@@ -1,6 +1,7 @@
 import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE } from '../middleware/auth.js';
+import { sendPushToUsers } from '../services/pushNotifications.js';
 
 export const announcementsRouter = express.Router();
 
@@ -19,7 +20,7 @@ announcementsRouter.post('/', requireRole(ROLE.ADMIN, ROLE.TEACHER), asyncHandle
   if (title.length < 3 || title.length > 120) return fail(res, 400, 'Title must be 3 to 120 characters.');
   if (!body || body.length > 5000) return fail(res, 400, 'Announcement must be 1 to 5000 characters.');
 
-  const [announcement] = await sql`
+  const [created] = await sql`
     WITH created AS (
       INSERT INTO announcements (title, body, created_by)
       VALUES (${title}, ${body}, ${req.user.id})
@@ -31,10 +32,19 @@ announcementsRouter.post('/', requireRole(ROLE.ADMIN, ROLE.TEACHER), asyncHandle
       FROM created CROSS JOIN users u JOIN students s ON s.user_id = u.id
       WHERE u.role = ${ROLE.STUDENT} AND u.is_active = TRUE
       ON CONFLICT (user_id, event_key) DO NOTHING
-      RETURNING user_id
+      RETURNING user_id AS "userId"
     )
-    SELECT created.id, created.title, created.body, created."createdAt", ${req.user.fullName} AS "authorName"
+    SELECT created.id, created.title, created.body, created."createdAt", ${req.user.fullName} AS "authorName",
+           ARRAY(SELECT "userId" FROM sent) AS "recipientIds"
     FROM created
   `;
+  const { recipientIds, ...announcement } = created;
+  await sendPushToUsers(recipientIds, {
+    type: 'announcement',
+    title: announcement.title,
+    body: announcement.body,
+    relatedType: 'announcement',
+    relatedId: announcement.id,
+  });
   return res.status(201).json({ success: true, data: announcement });
 }));

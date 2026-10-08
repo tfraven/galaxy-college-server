@@ -261,6 +261,15 @@ export const initSchema = async () => {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications (user_id, created_at DESC) WHERE read_at IS NULL`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS push_installations (
+      installation_id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device_id TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_push_installations_user ON push_installations (user_id)`;
 
   // Indexes for the hot paths: auto-submit job, student lists, session lists, question picking.
   await sql`CREATE INDEX IF NOT EXISTS idx_attempts_open ON attempts (deadline_at) WHERE submitted_at IS NULL`;
