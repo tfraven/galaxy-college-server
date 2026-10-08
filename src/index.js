@@ -54,7 +54,9 @@ const inlineHashes = (tag) => {
 const classroomCsp = [
   "default-src 'self'",
 
-  `script-src 'self' ${inlineHashes('script').join(
+  // blob: is required because the Zoom VideoSDK dynamically creates blob: URLs
+  // for lazy-loaded WASM/JS chunks (e.g. wmsc.min.js, audio worklets).
+  `script-src 'self' blob: ${inlineHashes('script').join(
     ' '
   )} 'wasm-unsafe-eval' https://source.zoom.us https://*.zoom.us`,
 
@@ -66,7 +68,9 @@ const classroomCsp = [
 
   "media-src 'self' blob: https://zoom.us https://*.zoom.us",
 
-  "connect-src 'self' https://zoom.us https://*.zoom.us wss://zoom.us wss://*.zoom.us",
+  // https://*.cloudfront.net is required because the Zoom SDK fetches
+  // JS sourcemap files (*.map) from its CloudFront CDN at runtime.
+  "connect-src 'self' https://zoom.us https://*.zoom.us wss://zoom.us wss://*.zoom.us https://*.cloudfront.net",
 
   "worker-src 'self' blob: https://zoom.us https://*.zoom.us",
 
@@ -222,6 +226,12 @@ app.use('/classroom.html', (_req, res, next) => {
       'microphone=(self "https://zoom.us" "https://*.zoom.us")',
       'display-capture=(self "https://zoom.us" "https://*.zoom.us")',
       'fullscreen=(self "https://zoom.us" "https://*.zoom.us")',
+      // Required by the Zoom media engine to prevent console violations:
+      'screen-wake-lock=(self)',
+      'compute-pressure=(self)',
+      // Zoom's JsMediaSDK uses the unload event (handleUnloadEvent) for cleanup.
+      // Chrome 117+ blocks unload handlers via Permissions-Policy by default.
+      'unload=(self)',
     ].join(', ')
   );
 

@@ -28,6 +28,23 @@ const toDto = (t) => ({
   createdAt: t.created_at,
 });
 
+const publishedExamNotification = (row) => {
+  const courseName = row.subjectname
+    ? `${row.subjectname}${row.classname ? ` (${row.classname})` : ''}`
+    : `Exam "${row.title}"`;
+  const startAt = row.start_at ?? row.startAt;
+  const startDate = startAt ? new Date(startAt) : null;
+  const availableFrom = startDate && !Number.isNaN(startDate.getTime())
+    ? ` from ${startDate.toLocaleString()}`
+    : '';
+
+  return {
+    type: 'exam_published',
+    title: `Exam published: ${row.title}`,
+    body: `${courseName} is available${availableFrom}.`,
+  };
+};
+
 // One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
 const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null } = {}) => sql`
   SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark,
@@ -130,8 +147,7 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
   if (status === 2) {
     const [course] = await sql`SELECT class_id FROM courses WHERE id = ${courseId}`;
     await notifyStudents({
-      type: 'exam_published', title: `Exam published: ${row.title}`,
-      body: `${row.courseName} is available from ${new Date(row.startAt).toLocaleString()}.`,
+      ...publishedExamNotification(row),
       relatedType: 'test', relatedId: id, eventKey: `exam_published:${id}`,
       classId: course.class_id, sectionId: sectionId || null,
     });
@@ -158,8 +174,7 @@ testsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async
   if (status === 2 && row.status !== 2) {
     const [course] = await sql`SELECT class_id FROM courses WHERE id = ${row.course_id}`;
     await notifyStudents({
-      type: 'exam_published', title: `Exam published: ${updated.title}`,
-      body: `${updated.courseName} is available from ${new Date(updated.start_at).toLocaleString()}.`,
+      ...publishedExamNotification(updated),
       relatedType: 'test', relatedId: id, eventKey: `exam_published:${id}`,
       classId: course.class_id, sectionId: row.section_id,
     });
