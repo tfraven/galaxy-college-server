@@ -164,6 +164,29 @@ export const initSchema = async () => {
   `;
 
   await sql`
+    CREATE TABLE IF NOT EXISTS recurring_live_schedules (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id),
+      section_id INTEGER REFERENCES sections(id),
+      course_name TEXT NOT NULL DEFAULT 'General',
+      title TEXT NOT NULL,
+      host_id INTEGER REFERENCES users(id),
+      timezone TEXT NOT NULL DEFAULT 'Asia/Karachi',
+      weekly_slots JSONB NOT NULL DEFAULT '[]'::jsonb,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    ALTER TABLE live_sessions
+    ADD COLUMN IF NOT EXISTS recurring_schedule_id INTEGER REFERENCES recurring_live_schedules(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS recurrence_key TEXT
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_live_sessions_recurring_occurrence ON live_sessions (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL`;
+
+  await sql`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0
   `;
