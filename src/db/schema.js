@@ -129,8 +129,10 @@ export const initSchema = async () => {
   await sql`
     ALTER TABLE tests
     ADD COLUMN IF NOT EXISTS test_type TEXT NOT NULL DEFAULT 'quiz',
-    ADD COLUMN IF NOT EXISTS grand_test_id INTEGER REFERENCES grand_test_groups(id) ON DELETE CASCADE
+    ADD COLUMN IF NOT EXISTS grand_test_id INTEGER REFERENCES grand_test_groups(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS grand_test_order INTEGER
   `;
+  await sql`ALTER TABLE grand_test_groups ADD COLUMN IF NOT EXISTS subject_order JSONB NOT NULL DEFAULT '[]'::jsonb`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS test_questions (
@@ -139,6 +141,7 @@ export const initSchema = async () => {
       PRIMARY KEY(test_id, question_id)
     )
   `;
+  await sql`ALTER TABLE test_questions ADD COLUMN IF NOT EXISTS question_order INTEGER`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS attempts (
@@ -330,7 +333,9 @@ export const initSchema = async () => {
   await sql`CREATE INDEX IF NOT EXISTS idx_attempts_student ON attempts (student_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_questions_course ON questions (course_id) WHERE is_active`;
   await sql`CREATE INDEX IF NOT EXISTS idx_test_questions_q ON test_questions (question_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_test_questions_order ON test_questions (test_id, question_order)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_tests_course ON tests (course_id, status)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_tests_grand_order ON tests (grand_test_id, grand_test_order) WHERE grand_test_id IS NOT NULL`;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_class ON live_sessions (class_id, status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_students_class ON students (class_id, section_id)`;
 

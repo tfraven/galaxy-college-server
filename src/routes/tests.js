@@ -26,6 +26,7 @@ const toDto = (t) => ({
   status: t.status,
   testType: t.test_type || 'quiz',
   grandTestId: t.grand_test_id || null,
+  grandTestOrder: t.grand_test_order ?? null,
   questionIds: (t.question_ids || []).map(Number),
   createdBy: t.created_by,
   createdAt: t.created_at,
@@ -50,11 +51,11 @@ const publishedExamNotification = (row) => {
 
 // One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
 const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, classId = null, sectionId = null, courseId = null, searchPattern = null, pagination = null } = {}) => sql`
-  SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark, t.test_type, t.grand_test_id,
+  SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark, t.test_type, t.grand_test_id, t.grand_test_order,
          t.shuffle_q, t.shuffle_opt, t.start_at, t.end_at, t.result_mode, t.results_released, t.status,
          t.created_by, t.created_at,
          s.name AS subjectname, cl.name AS classname, sec.name AS sectionname,
-         COALESCE((SELECT array_agg(tq.question_id ORDER BY tq.question_id) FROM test_questions tq WHERE tq.test_id = t.id), '{}') AS question_ids
+         COALESCE((SELECT array_agg(tq.question_id ORDER BY tq.question_order NULLS LAST, tq.question_id) FROM test_questions tq WHERE tq.test_id = t.id), '{}') AS question_ids
   FROM tests t
   JOIN courses c ON t.course_id = c.id
   JOIN subjects s ON c.subject_id = s.id
@@ -69,7 +70,10 @@ const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, class
           AND (t.section_id IS NULL OR t.section_id = ${sectionId}::int)))
     AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
     AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
-  ORDER BY t.id DESC
+  ORDER BY CASE WHEN ${grandTestId}::int IS NOT NULL THEN t.grand_test_order END ASC NULLS LAST,
+           CASE WHEN t.grand_test_id IS NULL THEN t.id
+                ELSE (SELECT MAX(child.id) FROM tests child WHERE child.grand_test_id = t.grand_test_id) END DESC,
+           t.grand_test_order ASC NULLS LAST, t.id DESC
   LIMIT ${pagination?.pageSize ?? 1000} OFFSET ${pagination?.offset ?? 0}
 `;
 
@@ -122,6 +126,7 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
   const status = toInt(req.body?.status ?? 1);
   const shuffleQ = req.body?.shuffleQ !== false;
   const shuffleOpt = req.body?.shuffleOpt !== false;
+  const requestedSubjects = Array.isArray(req.body?.subjects) ? req.body.subjects : null;
   const start = new Date(req.body?.startAt || Date.now());
   const end = new Date(req.body?.endAt || Date.now() + 7 * 864e5);
   if (!classId || !title || title.length > 180) return fail(res, 400, 'Choose a class and enter a Grand Test title.');
@@ -131,6 +136,17 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
   if (![1, 2, 3].includes(resultMode) || ![1, 2].includes(status) || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
     return fail(res, 400, 'Choose a valid schedule, result mode, and status.');
   }
+  if (!requestedSubjects?.length) return fail(res, 400, 'Choose at least one question for every subject.');
+  const selectedSubjects = requestedSubjects.map((subject) => ({
+    courseId: Number(subject?.courseId),
+    questionIds: Array.isArray(subject?.questionIds) ? subject.questionIds.map(Number) : [],
+  }));
+  if (selectedSubjects.some(({ courseId, questionIds }) =>
+    !Number.isSafeInteger(courseId) || courseId <= 0 || !questionIds.length ||
+    questionIds.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(questionIds).size !== questionIds.length) ||
+    new Set(selectedSubjects.map(({ courseId }) => courseId)).size !== selectedSubjects.length) {
+    return fail(res, 400, 'Choose unique active questions for every subject.');
+  }
   const subjects = await sql`
     SELECT c.id AS course_id, s.name AS subject_name, COUNT(q.id)::int AS question_count
     FROM courses c JOIN subjects s ON s.id = c.subject_id
@@ -139,28 +155,51 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
     GROUP BY c.id, s.name ORDER BY s.name
   `;
   if (!subjects.length) return fail(res, 400, 'This class has no subjects. Add its courses before creating a Grand Test.');
+  const classCourseIds = new Set(subjects.map((subject) => subject.course_id));
+  if (selectedSubjects.length !== subjects.length || selectedSubjects.some(({ courseId }) => !classCourseIds.has(courseId))) {
+    return fail(res, 400, 'A Grand Test must include every subject in the selected class exactly once.');
+  }
   const emptySubjects = subjects.filter((subject) => subject.question_count < 1).map((subject) => subject.subject_name);
   if (emptySubjects.length) return fail(res, 400, `Add active questions to every subject first. Missing: ${emptySubjects.join(', ')}.`);
+  for (const subject of selectedSubjects) {
+    const [{ n }] = await sql`
+      SELECT COUNT(*)::int AS n FROM questions
+      WHERE id = ANY(${subject.questionIds}::int[]) AND course_id = ${subject.courseId} AND is_active = TRUE
+    `;
+    if (n !== subject.questionIds.length) return fail(res, 400, 'Some selected questions are inactive or belong to another subject.');
+  }
 
+  const subjectPayload = JSON.stringify(selectedSubjects.map((subject, index) => ({
+    course_id: subject.courseId, sort_order: index + 1, question_ids: subject.questionIds,
+  })));
+  const subjectOrder = JSON.stringify(selectedSubjects.map(({ courseId }) => courseId));
   const [{ id: grandTestId }] = await sql`
-    WITH g AS (
+    WITH requested AS (
+      SELECT * FROM jsonb_to_recordset(${subjectPayload}::jsonb)
+        AS item(course_id INTEGER, sort_order INTEGER, question_ids JSONB)
+    ), g AS (
       INSERT INTO grand_test_groups (class_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
-                                     start_at, end_at, result_mode, status, created_by)
+                                     start_at, end_at, result_mode, status, created_by, subject_order)
       VALUES (${classId}, ${title}, ${durationMin}, ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
-              ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${status}, ${req.user.id})
+              ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${status}, ${req.user.id}, ${subjectOrder}::jsonb)
       RETURNING id
     ), subject_tests AS (
       INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
-                         start_at, end_at, result_mode, results_released, status, created_by, test_type, grand_test_id)
+                         start_at, end_at, result_mode, results_released, status, created_by, test_type, grand_test_id, grand_test_order)
       SELECT c.id, NULL, ${title} || ' — ' || s.name, ${durationMin}, ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
              ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${resultMode !== 3}, ${status}, ${req.user.id},
-             'grand_test', g.id
-      FROM g CROSS JOIN courses c JOIN subjects s ON s.id = c.subject_id
+             'grand_test', g.id, requested.sort_order
+      FROM g CROSS JOIN requested JOIN courses c ON c.id = requested.course_id JOIN subjects s ON s.id = c.subject_id
       WHERE c.class_id = ${classId}
+      ORDER BY requested.sort_order
       RETURNING id, course_id
     ), linked_questions AS (
-      INSERT INTO test_questions (test_id, question_id)
-      SELECT st.id, q.id FROM subject_tests st JOIN questions q ON q.course_id = st.course_id AND q.is_active = TRUE
+      INSERT INTO test_questions (test_id, question_id, question_order)
+      SELECT st.id, selected.question_id::int, selected.question_order::int
+      FROM subject_tests st
+      JOIN requested ON requested.course_id = st.course_id
+      CROSS JOIN LATERAL jsonb_array_elements_text(requested.question_ids) WITH ORDINALITY
+        AS selected(question_id, question_order)
       RETURNING test_id
     )
     SELECT id FROM g
@@ -183,7 +222,7 @@ testsRouter.get('/grand/:id', requireRole(...STAFF_ROLES), asyncHandler(async (r
   const rows = await fetchTests({ grandTestId: group.id });
   res.json({ success: true, data: { id: group.id, title: group.title, classId: group.class_id,
     className: group.class_name, startAt: group.start_at, endAt: group.end_at,
-    status: group.status, subjects: rows.map(toDto) } });
+    status: group.status, subjectOrder: group.subject_order || [], subjects: rows.map(toDto) } });
 }));
 
 // Includes correct answers, so staff only.
@@ -198,7 +237,7 @@ testsRouter.get('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, re
            q.opt_a AS "optA", q.opt_b AS "optB", q.opt_c AS "optC", q.opt_d AS "optD",
            q.correct, q.explanation, q.is_active AS "isActive"
     FROM questions q JOIN test_questions tq ON q.id = tq.question_id
-    WHERE tq.test_id = ${id} ORDER BY q.id ASC
+    WHERE tq.test_id = ${id} ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
   res.json({ success: true, data: { test: toDto(row), questions } });
 }));
@@ -245,8 +284,9 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
               ${resultMode !== 3}, ${status}, ${req.user.id}, ${testType})
       RETURNING id
     ), tq AS (
-      INSERT INTO test_questions (test_id, question_id)
-      SELECT t.id, q FROM t, unnest(${questionIds}::int[]) AS q
+      INSERT INTO test_questions (test_id, question_id, question_order)
+      SELECT t.id, q.question_id, q.question_order::int
+      FROM t, unnest(${questionIds}::int[]) WITH ORDINALITY AS q(question_id, question_order)
     )
     SELECT id FROM t
   `;
@@ -322,7 +362,7 @@ testsRouter.get('/:id/document', requireRole(...STAFF_ROLES), asyncHandler(async
   const questions = await sql`
     SELECT q.id, q.body, q.topic, q.image, q.correct, q.opt_a, q.opt_b, q.opt_c, q.opt_d
     FROM questions q JOIN test_questions tq ON q.id = tq.question_id
-    WHERE tq.test_id = ${id} ORDER BY q.id ASC
+    WHERE tq.test_id = ${id} ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
 
   res.json({
@@ -385,8 +425,9 @@ testsRouter.put('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, re
     await sql.transaction([
       sql`DELETE FROM test_questions WHERE test_id = ${id}`,
       sql`
-        INSERT INTO test_questions (test_id, question_id)
-        SELECT ${id}, q FROM unnest(${qIds}::int[]) AS q
+        INSERT INTO test_questions (test_id, question_id, question_order)
+        SELECT ${id}, q.question_id, q.question_order::int
+        FROM unnest(${qIds}::int[]) WITH ORDINALITY AS q(question_id, question_order)
       `
     ]);
   }
@@ -445,7 +486,7 @@ testsRouter.get('/:id/analytics', requireRole(...STAFF_ROLES), asyncHandler(asyn
     FROM questions q
     JOIN test_questions tq ON q.id = tq.question_id
     WHERE tq.test_id = ${id}
-    ORDER BY q.id ASC
+    ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
 
   const answers = await sql`

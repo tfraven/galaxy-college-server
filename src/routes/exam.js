@@ -78,7 +78,7 @@ examRouter.post('/start', requireRole(ROLE.STUDENT), asyncHandler(async (req, re
   const raw = await sql`
     SELECT q.id, q.topic, q.body, q.image, q.opt_a, q.opt_b, q.opt_c, q.opt_d
     FROM questions q JOIN test_questions tq ON q.id = tq.question_id
-    WHERE tq.test_id = ${testId} ORDER BY q.id ASC
+    WHERE tq.test_id = ${testId} ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
 
   let questions = raw.map((q) => {
@@ -165,7 +165,7 @@ examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
   const questions = await sql`
     SELECT q.id, q.topic, q.body, q.image, q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.correct, q.explanation
     FROM questions q JOIN test_questions tq ON q.id = tq.question_id
-    WHERE tq.test_id = ${test.id} ORDER BY q.id ASC
+    WHERE tq.test_id = ${test.id} ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
   const answers = await sql`SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${attemptId}`;
   const chosenBy = new Map(answers.map((a) => [a.question_id, a.chosen]));
