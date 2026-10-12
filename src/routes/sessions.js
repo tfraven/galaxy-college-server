@@ -149,7 +149,10 @@ const getAccess = async (user, sessionId) => {
 
   if (user.role === ROLE.VIDEO_PARTICIPANT) {
     if (!session.video_enabled) return { error: [403, 'Video participants are not enabled for this class.'] };
-    return { session, isHost: false };
+    // This dedicated account can only see video-enabled sessions. It joins as a
+    // Zoom host so the native app can publish local camera video and manage its
+    // in-room media controls; it still has no application staff permissions.
+    return { session, isHost: true };
   }
 
   const enrol = await getStudentEnrolment(user.id);
