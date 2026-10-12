@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,6 +14,7 @@ import { seedDatabase } from './db/seed.js';
 import { authenticate } from './middleware/auth.js';
 import { finalizeAttempt } from './services/grading.js';
 import { zoomConfigured } from './services/zoom.js';
+import { runLiveSessionScheduler } from './services/liveSessionScheduler.js';
 
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
@@ -277,6 +278,23 @@ app.get('/api/v1/health', (_req, res) => {
   });
 });
 
+// Vercel Cron calls this once per minute. CRON_SECRET must be configured in the deployment env.
+app.get('/api/v1/cron/live-sessions', async (req, res, next) => {
+  const secret = process.env.CRON_SECRET || '';
+  const supplied = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  const expectedBuffer = Buffer.from(secret);
+  const suppliedBuffer = Buffer.from(supplied);
+  if (!secret) return res.status(503).json({ success: false, error: 'Live class scheduler secret is not configured.' });
+  if (expectedBuffer.length !== suppliedBuffer.length || !timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+    return res.status(401).json({ success: false, error: 'Invalid scheduler authorization.' });
+  }
+  try {
+    return res.json({ success: true, data: await runLiveSessionScheduler() });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 
 /*
  * ============================================================
@@ -479,6 +497,9 @@ const start = async () => {
       autoSubmitExpiredAttempts,
       30_000
     );
+    setInterval(() => {
+      runLiveSessionScheduler().catch((error) => console.error('[live-scheduler] error', { code: String(error?.code || '').slice(0, 40) }));
+    }, 30_000);
 
     app.listen(
       config.port,

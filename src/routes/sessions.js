@@ -278,6 +278,20 @@ sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPER
   res.json({ success: true, data: row });
 }));
 
+sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id) return fail(res, 400, 'Invalid recurring schedule id.');
+  await sql`
+    DELETE FROM notifications WHERE related_type = 'live_session' AND related_id IN (
+      SELECT id FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()
+    )
+  `;
+  await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
+  const [deleted] = await sql`DELETE FROM recurring_live_schedules WHERE id = ${id} RETURNING id`;
+  if (!deleted) return fail(res, 404, 'Recurring schedule not found.');
+  res.json({ success: true, data: { id: deleted.id, deleted: true } });
+}));
+
 const NEXT = { 1: [2, 3], 2: [3] }; // Scheduled -> Live | Ended ; Live -> Ended (LIV-3)
 
 sessionsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
