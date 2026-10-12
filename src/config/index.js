@@ -48,6 +48,8 @@ export const config = {
   jwtIssuer: 'college-runner-api',
   jwtAudience: 'college-runner-mobile',
   databaseUrl: process.env.DATABASE_URL || '',
+  // Recurring live classes remain implemented, but are off until a scheduler is configured.
+  recurringLiveClassesEnabled: process.env.ENABLE_RECURRING_LIVE_CLASSES === 'true',
   // An empty list denies browser origins; native mobile requests do not use browser CORS.
   corsOrigins,
   zoom: {

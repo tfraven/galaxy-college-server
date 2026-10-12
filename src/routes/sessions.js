@@ -5,8 +5,16 @@ import { canManageClass, getStudentEnrolment } from '../services/access.js';
 import { notifyStudents } from '../services/notifications.js';
 import { generateVideoSdkToken, sessionIdFromReference, sessionNameFor, sessionReferenceFor } from '../services/zoom.js';
 import { getPagination, paginationMeta } from '../middleware/pagination.js';
+import { config } from '../config/index.js';
 
 export const sessionsRouter = express.Router();
+
+const requireRecurringFeature = (_req, res, next) => {
+  if (!config.recurringLiveClassesEnabled) {
+    return fail(res, 503, 'Recurring live-class scheduling is temporarily disabled.');
+  }
+  return next();
+};
 
 const toDto = (s) => ({
   id: s.id,
@@ -210,7 +218,7 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
   res.status(201).json({ success: true, data: toDto(row) });
 }));
 
-sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), requireRecurringFeature, asyncHandler(async (req, res) => {
   const pagination = getPagination(req.query);
   const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM recurring_live_schedules WHERE deleted_at IS NULL`;
   const rows = await sql`
@@ -227,7 +235,7 @@ sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHa
   res.json({ success: true, data: rows.map(toRecurringDto), pagination: paginationMeta(total, pagination) });
 }));
 
-sessionsRouter.post('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+sessionsRouter.post('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), requireRecurringFeature, asyncHandler(async (req, res) => {
   const values = await validateRecurringPayload(req, res, req.body || {});
   if (!values) return;
   let hostId = values.hostId;
@@ -255,7 +263,7 @@ sessionsRouter.post('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncH
   res.status(201).json({ success: true, data: toRecurringDto(details) });
 }));
 
-sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), requireRecurringFeature, asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return fail(res, 400, 'Invalid recurring schedule id.');
   const [existing] = await sql`SELECT id FROM recurring_live_schedules WHERE id = ${id} AND deleted_at IS NULL`;
@@ -295,7 +303,7 @@ sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asy
   res.json({ success: true, data: toRecurringDto(details) });
 }));
 
-sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPERATOR), requireRecurringFeature, asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id || typeof req.body?.enabled !== 'boolean') return fail(res, 400, 'A schedule id and enabled flag are required.');
   const [row] = await sql`UPDATE recurring_live_schedules SET enabled = ${req.body.enabled}, updated_at = NOW() WHERE id = ${id} AND deleted_at IS NULL RETURNING id, enabled`;
@@ -312,7 +320,7 @@ sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPER
   res.json({ success: true, data: row });
 }));
 
-sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), requireRecurringFeature, asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return fail(res, 400, 'Invalid recurring schedule id.');
   await sql`

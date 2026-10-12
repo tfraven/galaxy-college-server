@@ -278,8 +278,11 @@ app.get('/api/v1/health', (_req, res) => {
   });
 });
 
-// Vercel Cron calls this once per minute. CRON_SECRET must be configured in the deployment env.
+// Retained for deployments with an explicitly configured scheduler. Vercel Cron is currently disabled.
 app.get('/api/v1/cron/live-sessions', async (req, res, next) => {
+  if (!config.recurringLiveClassesEnabled) {
+    return res.status(503).json({ success: false, error: 'Recurring live-class scheduling is temporarily disabled.' });
+  }
   const secret = process.env.CRON_SECRET || '';
   const supplied = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
   const expectedBuffer = Buffer.from(secret);
@@ -497,9 +500,11 @@ const start = async () => {
       autoSubmitExpiredAttempts,
       30_000
     );
-    setInterval(() => {
-      runLiveSessionScheduler().catch((error) => console.error('[live-scheduler] error', { code: String(error?.code || '').slice(0, 40) }));
-    }, 30_000);
+    if (config.recurringLiveClassesEnabled && !process.env.VERCEL) {
+      setInterval(() => {
+        runLiveSessionScheduler().catch((error) => console.error('[live-scheduler] error', { code: String(error?.code || '').slice(0, 40) }));
+      }, 30_000);
+    }
 
     app.listen(
       config.port,

@@ -3,8 +3,5 @@
     "src/index.js": {
       "includeFiles": "src/views/classroom.html"
     }
-  },
-  "crons": [
-    { "path": "/api/v1/cron/live-sessions", "schedule": "* * * * *" }
-  ]
+  }
 }
