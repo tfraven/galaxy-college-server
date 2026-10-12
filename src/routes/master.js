@@ -259,6 +259,11 @@ masterRouter.post('/courses', asyncHandler(async (req, res) => {
   if (req.user.role !== 1) return res.status(403).json({ success: false, error: 'Admin only' });
   const { classId, subjectId } = req.body || {};
   if (!classId || !subjectId) return res.status(400).json({ success: false, error: 'classId and subjectId required' });
+  const [activePair] = await sql`
+    SELECT cl.id FROM classes cl CROSS JOIN subjects s
+    WHERE cl.id = ${classId} AND cl.is_active = TRUE AND s.id = ${subjectId} AND s.is_active = TRUE
+  `;
+  if (!activePair) return res.status(400).json({ success: false, error: 'Choose an active class and subject' });
   const [created] = await sql`
     INSERT INTO courses (class_id, subject_id)
     VALUES (${classId}, ${subjectId})

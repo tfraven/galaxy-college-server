@@ -191,6 +191,8 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
     return fail(res, 400, 'Choose a valid schedule, result mode, and status.');
   }
   if (!requestedSubjects?.length) return fail(res, 400, 'Choose at least one question for every subject.');
+  const [activeClass] = await sql`SELECT id FROM classes WHERE id = ${classId} AND is_active = TRUE`;
+  if (!activeClass) return fail(res, 400, 'Choose an active class for the Grand Test.');
   const selectedSubjects = requestedSubjects.map((subject) => ({
     courseId: Number(subject?.courseId),
     questionIds: Array.isArray(subject?.questionIds) ? subject.questionIds.map(Number) : [],
@@ -205,7 +207,7 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
     SELECT c.id AS course_id, s.name AS subject_name, COUNT(q.id)::int AS question_count
     FROM courses c JOIN subjects s ON s.id = c.subject_id
     LEFT JOIN questions q ON q.course_id = c.id AND q.is_active = TRUE
-    WHERE c.class_id = ${classId}
+    WHERE c.class_id = ${classId} AND s.is_active = TRUE
     GROUP BY c.id, s.name ORDER BY s.name
   `;
   if (!subjects.length) return fail(res, 400, 'This class has no subjects. Add its courses before creating a Grand Test.');
@@ -485,6 +487,13 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
   if (!['quiz', 'class_test'].includes(testType)) return fail(res, 400, 'Choose Quiz or Class Test. Grand Tests must use the Grand Test scheduler.');
   if (!(durationMin > 0) || !(markPerQ > 0) || negMark < 0) return fail(res, 400, 'Invalid duration or marks');
   if (![1, 2, 3].includes(resultMode) || ![1, 2, 3].includes(status)) return fail(res, 400, 'Invalid result mode or status');
+  const [activeCourse] = await sql`
+    SELECT c.id FROM courses c
+    JOIN classes cl ON cl.id = c.class_id
+    JOIN subjects s ON s.id = c.subject_id
+    WHERE c.id = ${courseId} AND cl.is_active = TRUE AND s.is_active = TRUE
+  `;
+  if (!activeCourse) return fail(res, 400, 'Choose an active course from the curriculum.');
   if (!(await canManageCourse(req.user, courseId))) return fail(res, 403, 'You are not assigned to this course.');
 
   const now = new Date();
@@ -494,7 +503,7 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
 
   if (sectionId) {
     const [sec] = await sql`
-      SELECT 1 FROM sections s JOIN courses c ON c.class_id = s.class_id WHERE s.id = ${sectionId} AND c.id = ${courseId}
+      SELECT 1 FROM sections s JOIN courses c ON c.class_id = s.class_id WHERE s.id = ${sectionId} AND s.is_active = TRUE AND c.id = ${courseId}
     `;
     if (!sec) return fail(res, 400, 'Section does not belong to this course\'s class');
   }
