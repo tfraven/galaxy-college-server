@@ -67,7 +67,7 @@ const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId
     AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
     AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
   ORDER BY t.id DESC
-  ${pagination ? sql`LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}` : sql``}
+  LIMIT ${pagination?.pageSize ?? 1} OFFSET ${pagination?.offset ?? 0}
 `;
 
 // EXM-1 / TST-6: students see only Published tests of their own class/section; staff see their scope.

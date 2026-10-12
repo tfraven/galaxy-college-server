@@ -128,7 +128,7 @@ const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId 
           SELECT 1 FROM courses co JOIN teacher_courses tc ON tc.course_id = co.id
           WHERE co.class_id = s.class_id AND tc.user_id = ${teacherId}::int))
   ORDER BY s.status ASC, s.plan_start ASC
-  ${pagination ? sql`LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}` : sql``}
+  LIMIT ${pagination?.pageSize ?? 1} OFFSET ${pagination?.offset ?? 0}
 `;
 
 /**
