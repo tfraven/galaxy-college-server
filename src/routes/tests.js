@@ -273,19 +273,28 @@ testsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async
   const [row] = await fetchTests({ testId: id });
   if (!row) return fail(res, 404, 'Test not found');
   if (!(await canManageCourse(req.user, row.course_id))) return fail(res, 403, 'Not your course.');
+  if (row.grand_test_id && ![ROLE.ADMIN, ROLE.OPERATOR].includes(req.user.role)) return fail(res, 403, 'Only Admin or Operator can change a Grand Test schedule.');
   if (status !== row.status && !TRANSITIONS[row.status]?.includes(status)) {
     return fail(res, 400, 'Allowed flow is Draft -> Published -> Closed.');
   }
 
-  await sql`UPDATE tests SET status = ${status} WHERE id = ${id}`;
+  const affectedTests = row.grand_test_id
+    ? await fetchTests({ grandTestId: row.grand_test_id })
+    : [row];
+  if (row.grand_test_id) {
+    await sql`UPDATE tests SET status = ${status} WHERE grand_test_id = ${row.grand_test_id}`;
+    await sql`UPDATE grand_test_groups SET status = ${status} WHERE id = ${row.grand_test_id}`;
+  } else {
+    await sql`UPDATE tests SET status = ${status} WHERE id = ${id}`;
+  }
   const [updated] = await fetchTests({ testId: id });
   if (status === 2 && row.status !== 2) {
-    const [course] = await sql`SELECT class_id FROM courses WHERE id = ${row.course_id}`;
-    await notifyStudents({
-      ...publishedExamNotification(updated),
-      relatedType: 'test', relatedId: id, eventKey: `exam_published:${id}`,
-      classId: course.class_id, sectionId: row.section_id,
-    });
+    for (const affected of affectedTests) {
+      const [published] = await fetchTests({ testId: affected.id });
+      const [course] = await sql`SELECT class_id FROM courses WHERE id = ${affected.course_id}`;
+      await notifyStudents({ ...publishedExamNotification(published), relatedType: 'test', relatedId: affected.id,
+        eventKey: `exam_published:${affected.id}`, classId: course.class_id, sectionId: affected.section_id });
+    }
   }
   res.json({ success: true, data: toDto(updated) });
 }));
@@ -297,7 +306,9 @@ testsRouter.patch('/:id/release', requireRole(...STAFF_ROLES), asyncHandler(asyn
   const [row] = await fetchTests({ testId: id });
   if (!row) return fail(res, 404, 'Test not found');
   if (!(await canManageCourse(req.user, row.course_id))) return fail(res, 403, 'Not your course.');
-  await sql`UPDATE tests SET results_released = ${released} WHERE id = ${id}`;
+  if (row.grand_test_id && ![ROLE.ADMIN, ROLE.OPERATOR].includes(req.user.role)) return fail(res, 403, 'Only Admin or Operator can release Grand Test results.');
+  if (row.grand_test_id) await sql`UPDATE tests SET results_released = ${released} WHERE grand_test_id = ${row.grand_test_id}`;
+  else await sql`UPDATE tests SET results_released = ${released} WHERE id = ${id}`;
   res.json({ success: true, data: { id, resultsReleased: released } });
 }));
 
@@ -335,6 +346,7 @@ testsRouter.put('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, re
   const id = toInt(req.params.id);
   const [test] = await sql`SELECT * FROM tests WHERE id = ${id}`;
   if (!test) return fail(res, 404, 'Test not found');
+  if (test.grand_test_id) return fail(res, 400, 'Subject papers cannot be edited individually in a Grand Test.');
   if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
 
   const {
@@ -388,6 +400,7 @@ testsRouter.delete('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req,
   const id = toInt(req.params.id);
   const [test] = await sql`SELECT * FROM tests WHERE id = ${id}`;
   if (!test) return fail(res, 404, 'Test not found');
+  if (test.grand_test_id) return fail(res, 400, 'Subject papers cannot be deleted individually from a Grand Test.');
   if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
 
   const attempts = await sql`SELECT COUNT(*)::int AS count FROM attempts WHERE test_id = ${id}`;

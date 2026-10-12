@@ -112,7 +112,7 @@ const validateRecurringPayload = async (req, res, payload) => {
 };
 
 const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId = null, pagination = null } = {}) => sql`
-  SELECT s.id, s.class_id, s.section_id, s.course_name, s.title, s.host_id, s.plan_start, s.plan_end,
+  SELECT s.id, s.class_id, s.section_id, s.course_name, s.title, s.host_id, s.video_enabled, s.plan_start, s.plan_end,
          s.status, s.started_at, s.ended_at, s.created_by,
          c.name AS classname, sec.name AS sectionname, u.full_name AS hostname,
          (SELECT COUNT(*)::int FROM session_joins WHERE session_id = s.id) AS participant_count
@@ -168,7 +168,7 @@ sessionsRouter.get('/', asyncHandler(async (req, res) => {
       const [{ count }] = await sql`
         SELECT COUNT(*)::int AS count FROM live_sessions s
         WHERE s.class_id = ${enrol.class_id} AND (s.section_id IS NULL OR s.section_id = ${enrol.section_id})
-          AND (s.status < 3 OR s.ended_at > NOW() - INTERVAL '1 day')
+          AND s.deleted_at IS NULL AND (s.status < 3 OR s.ended_at > NOW() - INTERVAL '1 day')
       `;
       total = count;
       rows = await fetchSessions({ classId: enrol.class_id, sectionId: enrol.section_id, pagination });
@@ -193,7 +193,7 @@ sessionsRouter.get('/', asyncHandler(async (req, res) => {
     const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
     const [{ count }] = await sql`
       SELECT COUNT(*)::int AS count FROM live_sessions s
-      WHERE (${teacherId}::int IS NULL OR s.host_id = ${teacherId}::int OR s.created_by = ${teacherId}::int OR EXISTS (
+      WHERE s.deleted_at IS NULL AND (${teacherId}::int IS NULL OR s.host_id = ${teacherId}::int OR s.created_by = ${teacherId}::int OR EXISTS (
         SELECT 1 FROM courses co JOIN teacher_courses tc ON tc.course_id = co.id
         WHERE co.class_id = s.class_id AND tc.user_id = ${teacherId}::int))
     `;
