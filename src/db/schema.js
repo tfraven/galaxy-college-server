@@ -35,6 +35,7 @@ export const initSchema = async () => {
       UNIQUE(class_id, name)
     )
   `;
+  await sql`ALTER TABLE sections ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS subjects (
@@ -42,6 +43,7 @@ export const initSchema = async () => {
       name TEXT UNIQUE NOT NULL
     )
   `;
+  await sql`ALTER TABLE subjects ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS courses (
