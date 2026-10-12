@@ -43,7 +43,7 @@ usersRouter.post('/:id/reset-password', asyncHandler(async (req, res) => {
     const hash = await bcrypt.hash(tempPassword, 10);
     const [row] = await sql`
       WITH changed AS (
-        UPDATE users SET password_hash = ${hash}, must_change_pw = TRUE,
+        UPDATE users SET password_hash = ${hash}, must_change_pw = FALSE,
                          active_device_id = NULL, active_device_label = NULL, device_last_seen_at = NULL,
                          token_version = token_version + 1
         WHERE id = ${id} RETURNING id, username

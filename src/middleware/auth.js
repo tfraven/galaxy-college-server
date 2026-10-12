@@ -55,13 +55,6 @@ export const authenticate = asyncHandler(async (req, res, next) => {
         }
     }
 
-    const authActionAllowed = req.baseUrl === '/api/v1/auth'
-        && (['/me', '/change-password', '/logout', '/device-login-requests/pending'].includes(req.path)
-            || /^\/device-login-requests\/[0-9a-f-]+\/decision$/i.test(req.path));
-    if (user.must_change_pw && !authActionAllowed) {
-        return fail(res, 403, 'Change your temporary password before continuing.');
-    }
-
     req.user = {
         id: user.id,
         role: user.role,

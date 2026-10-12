@@ -36,7 +36,7 @@ staffRouter.post('/', asyncHandler(async (req, res) => {
 
   const [u] = await sql`
     INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
-    VALUES (${finalRole}, ${username.trim()}, ${hash}, ${fullName.trim()}, ${phone || null}, TRUE, TRUE)
+    VALUES (${finalRole}, ${username.trim()}, ${hash}, ${fullName.trim()}, ${phone || null}, TRUE, FALSE)
     RETURNING id
   `;
 
@@ -44,7 +44,7 @@ staffRouter.post('/', asyncHandler(async (req, res) => {
     success: true,
     data: {
       id: u.id, role: finalRole, username: username.trim(), fullName: fullName.trim(),
-      phone: phone || null, isActive: true, mustChangePw: true,
+      phone: phone || null, isActive: true, mustChangePw: false,
       tempPassword, // shown once
     },
   });

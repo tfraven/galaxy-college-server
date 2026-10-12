@@ -16,7 +16,8 @@ const toUserDto = (u) => ({
   fullName: u.full_name,
   phone: u.phone,
   isActive: u.is_active,
-  mustChangePw: u.must_change_pw,
+  // Kept for older clients; initial login never requires a password change.
+  mustChangePw: false,
 });
 
 const toStudentDto = (st, user) => st ? ({

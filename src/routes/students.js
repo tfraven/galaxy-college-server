@@ -9,7 +9,7 @@ import { getPagination, paginationMeta } from '../middleware/pagination.js';
 export const studentsRouter = express.Router();
 
 const MAX_BULK_ROWS = 2000; // STU-9
-const BULK_BCRYPT_COST = 8; // temp passwords must be changed at first login; keeps 2,000 hashes fast
+const BULK_BCRYPT_COST = 8; // Keep large enrollment batches responsive while hashing passwords.
 
 studentsRouter.get('/', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const pagination = getPagination(req.query);
@@ -52,7 +52,7 @@ studentsRouter.post('/', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) 
   const [created] = await sql`
     WITH u AS (
       INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
-      VALUES (4, ${rollNo.trim()}, ${hash}, ${fullName.trim()}, ${phone || null}, TRUE, TRUE)
+      VALUES (4, ${rollNo.trim()}, ${hash}, ${fullName.trim()}, ${phone || null}, TRUE, FALSE)
       RETURNING id
     ), s AS (
       INSERT INTO students (user_id, class_id, section_id)
@@ -64,7 +64,7 @@ studentsRouter.post('/', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) 
   res.status(201).json({
     success: true,
     data: {
-      user: { id: created.id, role: 4, username: rollNo.trim(), fullName: fullName.trim(), phone: phone || null, isActive: true, mustChangePw: true },
+      user: { id: created.id, role: 4, username: rollNo.trim(), fullName: fullName.trim(), phone: phone || null, isActive: true, mustChangePw: false },
       student: { userId: created.id, rollNo: rollNo.trim(), classId, className: cls.name, sectionId: sectionId || null, sectionName: sec?.name ?? null },
       tempPassword, // shown once (STU-6)
     },
@@ -136,7 +136,7 @@ studentsRouter.post('/commit-bulk', requireRole(ROLE.ADMIN), asyncHandler(async 
     await sql`
       WITH ins AS (
         INSERT INTO users (role, username, password_hash, full_name, phone, is_active, must_change_pw)
-        SELECT 4, t.username, t.hash, t.full_name, NULLIF(t.phone, ''), TRUE, TRUE
+        SELECT 4, t.username, t.hash, t.full_name, NULLIF(t.phone, ''), TRUE, FALSE
         FROM unnest(${rows.map((r) => r.generatedRollNo)}::text[], ${hashes}::text[],
                     ${rows.map((r) => r.fullName.trim())}::text[], ${rows.map((r) => r.phone || '')}::text[])
              AS t(username, hash, full_name, phone)

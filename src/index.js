@@ -9,7 +9,6 @@ import { fileURLToPath } from 'url';
 import { config } from './config/index.js';
 import { sql } from './db/connection.js';
 import { initSchema } from './db/schema.js';
-import { forceLegacyDemoPasswordChange } from './db/securityMigrations.js';
 import { seedDatabase } from './db/seed.js';
 import { authenticate, requireRole, ROLE } from './middleware/auth.js';
 import { finalizeAttempt } from './services/grading.js';
@@ -483,7 +482,6 @@ const start = async () => {
   try {
     if (config.isProd) {
       await initSchema();
-      await forceLegacyDemoPasswordChange();
     } else {
       await seedDatabase();
     }
