@@ -46,7 +46,7 @@ const publishedExamNotification = (row) => {
     return {
       type: 'exam_published',
       title: `Grand Test published: ${row.title}`,
-      body: `${row.classname} · ${row.grand_subject_count} subjects is available${availableFrom}.`,
+      body: `${row.classname} · ${row.grand_subject_count} subjects are available${availableFrom}.`,
     };
   }
   const courseName = row.subjectname
@@ -85,12 +85,27 @@ const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, class
   WHERE (${testId}::int IS NULL OR t.id = ${testId}::int)
     AND (${grandTestId}::int IS NULL OR t.grand_test_id = ${grandTestId}::int)
     AND (${teacherId}::int IS NULL OR EXISTS (
-          SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
+          SELECT 1 FROM teacher_courses tc
+          WHERE tc.user_id = ${teacherId}::int
+            AND (tc.course_id = t.course_id OR (t.grand_test_order = 0 AND EXISTS (
+              SELECT 1 FROM tests child JOIN teacher_courses child_tc ON child_tc.course_id = child.course_id
+              WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0
+                AND child_tc.user_id = ${teacherId}::int
+            )))))
     AND (${classId}::int IS NULL OR (
           t.status = 2 AND c.class_id = ${classId}::int
           AND (t.section_id IS NULL OR t.section_id = ${sectionId}::int)))
-    AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
-    AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
+    AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int OR (t.grand_test_order = 0 AND EXISTS (
+      SELECT 1 FROM tests child WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0
+        AND child.course_id = ${courseId}::int
+    )))
+    AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text OR
+      (t.grand_test_order = 0 AND EXISTS (
+        SELECT 1 FROM tests child JOIN courses child_course ON child_course.id = child.course_id
+        JOIN subjects child_subject ON child_subject.id = child_course.subject_id
+        WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0
+          AND CONCAT_WS(' ', child_subject.name, cl.name) ILIKE ${searchPattern}::text
+      )))
     AND (${summaryOnly}::boolean = FALSE OR t.grand_test_id IS NULL OR t.grand_test_order = 0)
   ORDER BY CASE WHEN ${grandTestId}::int IS NOT NULL THEN t.grand_test_order END ASC NULLS LAST,
            CASE WHEN t.grand_test_id IS NULL THEN t.id
@@ -128,9 +143,24 @@ testsRouter.get('/', asyncHandler(async (req, res) => {
       JOIN classes cl ON cl.id = c.class_id
       LEFT JOIN sections sec ON sec.id = t.section_id
       WHERE (${teacherId}::int IS NULL OR EXISTS (
-        SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
-        AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
-        AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
+        SELECT 1 FROM teacher_courses tc
+        WHERE tc.user_id = ${teacherId}::int
+          AND (tc.course_id = t.course_id OR (t.grand_test_order = 0 AND EXISTS (
+            SELECT 1 FROM tests child JOIN teacher_courses child_tc ON child_tc.course_id = child.course_id
+            WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0
+              AND child_tc.user_id = ${teacherId}::int
+          )))))
+        AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int OR (t.grand_test_order = 0 AND EXISTS (
+          SELECT 1 FROM tests child WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0
+            AND child.course_id = ${courseId}::int
+        )))
+        AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text OR
+          (t.grand_test_order = 0 AND EXISTS (
+            SELECT 1 FROM tests child JOIN courses child_course ON child_course.id = child.course_id
+            JOIN subjects child_subject ON child_subject.id = child_course.subject_id
+            WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0
+              AND CONCAT_WS(' ', child_subject.name, cl.name) ILIKE ${searchPattern}::text
+          )))
         AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
     `;
     total = count;
@@ -270,6 +300,128 @@ testsRouter.get('/grand/:id', requireRole(...STAFF_ROLES), asyncHandler(async (r
     subjects: rows.filter((row) => row.grand_test_order > 0).map(toDto) } });
 }));
 
+testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [group] = await sql`
+    SELECT g.id, g.title, g.class_id, g.mark_per_q, g.neg_mark, g.status,
+           c.name AS class_name
+    FROM grand_test_groups g JOIN classes c ON c.id = g.class_id WHERE g.id = ${id}
+  `;
+  if (!group) return fail(res, 404, 'Grand Test not found.');
+
+  const groupTests = await sql`
+    SELECT t.id, t.course_id, t.grand_test_order, s.name AS subject_name
+    FROM tests t JOIN courses c ON c.id = t.course_id JOIN subjects s ON s.id = c.subject_id
+    WHERE t.grand_test_id = ${id} ORDER BY t.grand_test_order
+  `;
+  const master = groupTests.find((test) => test.grand_test_order === 0);
+  if (!master) return fail(res, 409, 'This Grand Test is not ready for combined results.');
+  const subjects = groupTests.filter((test) => test.grand_test_order > 0).map((test) => ({
+    id: test.course_id, name: test.subject_name, questionCount: 0, maxMarks: 0,
+  }));
+  const subjectByCourseId = new Map(subjects.map((subject) => [subject.id, subject]));
+  const questions = await sql`
+    SELECT q.id, q.course_id, q.correct
+    FROM test_questions tq JOIN questions q ON q.id = tq.question_id
+    WHERE tq.test_id = ${master.id} ORDER BY tq.question_order NULLS LAST, q.id
+  `;
+  for (const question of questions) {
+    const subject = subjectByCourseId.get(question.course_id);
+    if (subject) subject.questionCount += 1;
+  }
+  for (const subject of subjects) subject.maxMarks = subject.questionCount * Number(group.mark_per_q);
+
+  const students = await sql`
+    SELECT u.id, u.username AS roll_no, u.full_name
+    FROM students st JOIN users u ON u.id = st.user_id
+    WHERE st.class_id = ${group.class_id} AND u.is_active = TRUE
+    ORDER BY u.full_name, u.username
+  `;
+  const attempts = await sql`SELECT id, student_id, submitted_at FROM attempts WHERE test_id = ${master.id}`;
+  const attemptByStudent = new Map(attempts.map((attempt) => [attempt.student_id, attempt]));
+  const attemptIds = attempts.map((attempt) => attempt.id);
+  const answers = attemptIds.length ? await sql`
+    SELECT attempt_id, question_id, chosen FROM attempt_answers WHERE attempt_id = ANY(${attemptIds}::int[])
+  ` : [];
+  const answerByAttempt = new Map();
+  for (const answer of answers) {
+    if (!answerByAttempt.has(answer.attempt_id)) answerByAttempt.set(answer.attempt_id, new Map());
+    answerByAttempt.get(answer.attempt_id).set(answer.question_id, answer.chosen);
+  }
+  const questionBySubject = new Map(subjects.map((subject) => [subject.id, []]));
+  for (const question of questions) questionBySubject.get(question.course_id)?.push(question);
+
+  const reportRows = students.map((student) => {
+    const attempt = attemptByStudent.get(student.id) || null;
+    const studentAnswers = attempt ? answerByAttempt.get(attempt.id) || new Map() : new Map();
+    const subjectResults = {};
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let totalUnanswered = 0;
+    for (const subject of subjects) {
+      const subjectQuestions = questionBySubject.get(subject.id) || [];
+      let correct = 0;
+      let wrong = 0;
+      let unanswered = 0;
+      for (const question of subjectQuestions) {
+        const answer = studentAnswers.get(question.id);
+        if (!answer) unanswered += 1;
+        else if (answer === question.correct) correct += 1;
+        else wrong += 1;
+      }
+      totalCorrect += correct;
+      totalWrong += wrong;
+      totalUnanswered += unanswered;
+      const rawScore = correct * Number(group.mark_per_q) - wrong * Number(group.neg_mark);
+      const score = attempt?.submitted_at ? Math.max(0, Math.round(rawScore * 100) / 100) : null;
+      subjectResults[subject.id] = {
+        correct, wrong, unanswered, score, maxMarks: subject.maxMarks,
+        percentage: score === null || !subject.maxMarks ? null : Math.round((score / subject.maxMarks) * 100), rank: null,
+      };
+    }
+    const overallMaxMarks = questions.length * Number(group.mark_per_q);
+    const rawOverallScore = totalCorrect * Number(group.mark_per_q) - totalWrong * Number(group.neg_mark);
+    const overallScore = attempt?.submitted_at ? Math.max(0, Math.round(rawOverallScore * 100) / 100) : null;
+    return {
+      studentId: student.id, rollNo: student.roll_no, fullName: student.full_name,
+      attempted: Boolean(attempt), submittedAt: attempt?.submitted_at || null,
+      subjects: subjectResults,
+      overall: {
+        correct: totalCorrect, wrong: totalWrong, unanswered: totalUnanswered,
+        score: overallScore, maxMarks: overallMaxMarks,
+        percentage: overallScore === null || !overallMaxMarks ? null : Math.round((overallScore / overallMaxMarks) * 100),
+        rank: null,
+      },
+    };
+  });
+  const assignRanks = (scoreOf, assign) => {
+    const ranked = reportRows.filter((row) => row.submittedAt).sort((a, b) =>
+      scoreOf(b) - scoreOf(a) || a.rollNo.localeCompare(b.rollNo));
+    let rank = 0;
+    let previousScore = null;
+    ranked.forEach((row, index) => {
+      const score = scoreOf(row);
+      if (score !== previousScore) rank = index + 1;
+      assign(row, rank);
+      previousScore = score;
+    });
+  };
+  assignRanks((row) => row.overall.score, (row, rank) => { row.overall.rank = rank; });
+  for (const subject of subjects) {
+    assignRanks((row) => row.subjects[subject.id].score, (row, rank) => {
+      row.subjects[subject.id].rank = rank;
+    });
+  }
+
+  res.json({ success: true, data: {
+    id: group.id, title: group.title, classId: group.class_id, className: group.class_name,
+    status: group.status, totalQuestions: questions.length,
+    totalMarks: questions.length * Number(group.mark_per_q),
+    submittedCount: reportRows.filter((row) => row.submittedAt).length,
+    subjects, students: reportRows,
+  } });
+}));
+
 // Includes correct answers, so staff only.
 testsRouter.get('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
@@ -374,11 +526,16 @@ testsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(async
   }
   const [updated] = await fetchTests({ testId: id });
   if (status === 2 && row.status !== 2) {
-    for (const affected of affectedTests) {
-      const [published] = await fetchTests({ testId: affected.id });
-      const [course] = await sql`SELECT class_id FROM courses WHERE id = ${affected.course_id}`;
-      await notifyStudents({ ...publishedExamNotification(published), relatedType: 'test', relatedId: affected.id,
-        eventKey: `exam_published:${affected.id}`, classId: course.class_id, sectionId: affected.section_id });
+    if (row.grand_test_id) {
+      const master = affectedTests.find((affected) => affected.grand_test_order === 0);
+      if (master) {
+        const [published] = await fetchTests({ testId: master.id });
+        await notifyStudents({ ...publishedExamNotification(published), relatedType: 'test', relatedId: master.id,
+          eventKey: `grand_test_published:${row.grand_test_id}`, classId: master.class_id });
+      }
+    } else {
+      await notifyStudents({ ...publishedExamNotification(updated), relatedType: 'test', relatedId: updated.id,
+        eventKey: `exam_published:${updated.id}`, classId: updated.class_id, sectionId: updated.section_id });
     }
   }
   res.json({ success: true, data: toDto(updated) });

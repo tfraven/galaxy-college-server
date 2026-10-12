@@ -142,6 +142,33 @@ export const initSchema = async () => {
     )
   `;
   await sql`ALTER TABLE test_questions ADD COLUMN IF NOT EXISTS question_order INTEGER`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_tests_grand_master ON tests (grand_test_id) WHERE grand_test_id IS NOT NULL AND grand_test_order = 0`;
+  await sql`
+    WITH first_subject AS (
+      SELECT DISTINCT ON (t.grand_test_id) t.grand_test_id, t.course_id, t.results_released
+      FROM tests t
+      WHERE t.grand_test_id IS NOT NULL AND t.grand_test_order > 0
+      ORDER BY t.grand_test_id, t.grand_test_order
+    )
+    INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark,
+                       shuffle_q, shuffle_opt, start_at, end_at, result_mode, results_released,
+                       status, created_by, test_type, grand_test_id, grand_test_order)
+    SELECT fs.course_id, NULL, g.title, g.duration_min, g.mark_per_q, g.neg_mark,
+           g.shuffle_q, g.shuffle_opt, g.start_at, g.end_at, g.result_mode, fs.results_released,
+           g.status, g.created_by, 'grand_test', g.id, 0
+    FROM grand_test_groups g JOIN first_subject fs ON fs.grand_test_id = g.id
+    ON CONFLICT DO NOTHING
+  `;
+  await sql`
+    INSERT INTO test_questions (test_id, question_id, question_order)
+    SELECT master.id, tq.question_id,
+           ROW_NUMBER() OVER (PARTITION BY master.id ORDER BY child.grand_test_order, tq.question_order NULLS LAST, tq.question_id)::int
+    FROM tests master
+    JOIN tests child ON child.grand_test_id = master.grand_test_id AND child.grand_test_order > 0
+    JOIN test_questions tq ON tq.test_id = child.id
+    WHERE master.grand_test_id IS NOT NULL AND master.grand_test_order = 0
+    ON CONFLICT (test_id, question_id) DO NOTHING
+  `;
 
   await sql`
     CREATE TABLE IF NOT EXISTS attempts (

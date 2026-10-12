@@ -76,8 +76,10 @@ examRouter.post('/start', requireRole(ROLE.STUDENT), asyncHandler(async (req, re
 
   // EXM-8: correct answers are NEVER selected here.
   const raw = await sql`
-    SELECT q.id, q.topic, q.body, q.image, q.opt_a, q.opt_b, q.opt_c, q.opt_d
+    SELECT q.id, q.course_id, s.name AS subject_name, q.topic, q.body, q.image,
+           q.opt_a, q.opt_b, q.opt_c, q.opt_d
     FROM questions q JOIN test_questions tq ON q.id = tq.question_id
+    JOIN courses c ON c.id = q.course_id JOIN subjects s ON s.id = c.subject_id
     WHERE tq.test_id = ${testId} ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
 
@@ -89,9 +91,21 @@ examRouter.post('/start', requireRole(ROLE.STUDENT), asyncHandler(async (req, re
     if (test.shuffle_opt) options = seededShuffle(options, attempt.seed + q.id);
     // `key` is the ORIGINAL option id the client must send back; `label` is the A-D letter to display by position.
     options = options.map((o, i) => ({ ...o, label: 'ABCD'[i] }));
-    return { id: q.id, topic: q.topic, body: q.body, image: q.image, options };
+    return {
+      id: q.id, topic: q.topic, body: q.body, image: q.image, options,
+      ...(test.grand_test_id ? { courseId: q.course_id, subjectName: q.subject_name } : {}),
+    };
   });
-  if (test.shuffle_q) questions = seededShuffle(questions, attempt.seed);
+  if (test.shuffle_q && test.grand_test_id) {
+    const subjectGroups = [];
+    for (const question of questions) {
+      const last = subjectGroups[subjectGroups.length - 1];
+      if (!last || last[0].courseId !== question.courseId) subjectGroups.push([question]);
+      else last.push(question);
+    }
+    questions = subjectGroups.flatMap((subjectQuestions) =>
+      seededShuffle(subjectQuestions, attempt.seed + subjectQuestions[0].courseId));
+  } else if (test.shuffle_q) questions = seededShuffle(questions, attempt.seed);
 
   res.json({
     success: true,
@@ -163,8 +177,10 @@ examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
   }
 
   const questions = await sql`
-    SELECT q.id, q.topic, q.body, q.image, q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.correct, q.explanation
+    SELECT q.id, q.course_id, s.name AS subject_name, q.topic, q.body, q.image,
+           q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.correct, q.explanation
     FROM questions q JOIN test_questions tq ON q.id = tq.question_id
+    JOIN courses c ON c.id = q.course_id JOIN subjects s ON s.id = c.subject_id
     WHERE tq.test_id = ${test.id} ORDER BY tq.question_order NULLS LAST, q.id ASC
   `;
   const answers = await sql`SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${attemptId}`;
@@ -174,6 +190,7 @@ examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
     const chosen = chosenBy.get(q.id) ?? null;
     return {
       id: q.id, topic: q.topic, body: q.body, image: q.image,
+      subjectName: test.grand_test_id ? q.subject_name : null,
       options: [{ key: 'A', text: q.opt_a }, { key: 'B', text: q.opt_b }, { key: 'C', text: q.opt_c }, { key: 'D', text: q.opt_d }],
       chosenAnswer: chosen, correctAnswer: q.correct, isCorrect: chosen === q.correct, explanation: q.explanation,
     };
@@ -201,6 +218,7 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
   const [{ total }] = await sql`
     SELECT COUNT(*)::int AS total FROM attempts a JOIN tests t ON a.test_id = t.id
     WHERE a.student_id = ${studentId}
+      AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
   `;
@@ -210,6 +228,7 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
            (SELECT COUNT(*)::int FROM test_questions WHERE test_id = t.id) AS question_count
     FROM attempts a JOIN tests t ON a.test_id = t.id
     WHERE a.student_id = ${studentId}
+      AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
     ORDER BY a.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
