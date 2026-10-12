@@ -37,6 +37,21 @@ catalogRouter.get('/questions', asyncHandler(async (req, res) => {
   res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
+catalogRouter.get('/questions/:id', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id) return fail(res, 400, 'Invalid question id.');
+  const [question] = await sql`
+    SELECT q.id, q.course_id AS "courseId", q.topic, q.body, q.image,
+           q.opt_a AS "optA", q.opt_b AS "optB", q.opt_c AS "optC", q.opt_d AS "optD",
+           q.correct, q.explanation, q.is_active AS "isActive",
+           q.created_by AS "createdBy", q.created_at AS "createdAt"
+    FROM questions q WHERE q.id = ${id} AND q.is_active = TRUE
+  `;
+  if (!question) return fail(res, 404, 'Question not found.');
+  if (!(await canManageCourse(req.user, question.courseId))) return fail(res, 403, 'Not your course.');
+  res.json({ success: true, data: question });
+}));
+
 catalogRouter.post('/questions', asyncHandler(async (req, res) => {
   const { courseId, topic, body, image, optA, optB, optC, optD, correct, explanation } = req.body || {};
   if (!courseId || !body?.trim() || !optA?.trim() || !optB?.trim() || !optC?.trim() || !optD?.trim() || !correct) {

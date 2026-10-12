@@ -56,21 +56,34 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
       todayByTimezone.set(timeZone, today);
     }
     const slots = Array.isArray(schedule.weekly_slots) ? schedule.weekly_slots : [];
+    const occurrences = [];
     for (let dayOffset = 0; dayOffset < 14; dayOffset += 1) {
       const localDate = addDays(today, dayOffset);
       const weekday = weekdayFor(localDate);
       for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
         const slot = slots[slotIndex];
         if (Number(slot.weekday) !== weekday) continue;
-        const start = zonedLocalDateTimeToUtc(dateKey(localDate), slot.startTime, timeZone);
-        const end = zonedLocalDateTimeToUtc(dateKey(localDate), slot.endTime, timeZone);
+        const key = `${dateKey(localDate)}:${slotIndex}`;
+        occurrences.push({
+          key,
+          start: zonedLocalDateTimeToUtc(dateKey(localDate), slot.startTime, timeZone),
+          end: zonedLocalDateTimeToUtc(dateKey(localDate), slot.endTime, timeZone),
+        });
+      }
+    }
+    const existingOccurrences = occurrences.length
+      ? await sql`SELECT recurrence_key FROM live_sessions WHERE recurring_schedule_id = ${schedule.id} AND recurrence_key = ANY(${occurrences.map(({ key }) => key)}::text[])`
+      : [];
+    const existingKeys = new Set(existingOccurrences.map(({ recurrence_key }) => recurrence_key));
+    for (const occurrence of occurrences) {
+      if (existingKeys.has(occurrence.key)) continue;
         const [session] = await sql`
           INSERT INTO live_sessions (
             class_id, section_id, course_name, title, host_id, plan_start, plan_end,
             status, created_by, recurring_schedule_id, recurrence_key
           )
-          SELECT class_id, section_id, course_name, title, host_id, ${start.toISOString()}, ${end.toISOString()},
-                 1, created_by, id, ${`${dateKey(localDate)}:${slotIndex}`}
+          SELECT class_id, section_id, course_name, title, host_id, ${occurrence.start.toISOString()}, ${occurrence.end.toISOString()},
+                 1, created_by, id, ${occurrence.key}
           FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE
           ON CONFLICT (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL DO NOTHING
           RETURNING id, class_id, section_id, course_name, title, plan_start
@@ -83,13 +96,13 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
           relatedType: 'live_session', relatedId: session.id, eventKey: `live_scheduled:${session.id}`,
           classId: session.class_id, sectionId: session.section_id,
         });
-      }
     }
   }
 
   const started = await sql`
     UPDATE live_sessions SET status = 2, started_at = COALESCE(started_at, plan_start)
-    WHERE status = 1 AND plan_start <= ${now.toISOString()} AND plan_end > ${now.toISOString()}
+    WHERE recurring_schedule_id IS NOT NULL AND status = 1
+      AND plan_start <= ${now.toISOString()} AND plan_end > ${now.toISOString()}
     RETURNING id, class_id, section_id, course_name, title
   `;
   for (const session of started) {
@@ -103,7 +116,7 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
 
   const ended = await sql`
     UPDATE live_sessions SET status = 3, ended_at = COALESCE(ended_at, plan_end)
-    WHERE status IN (1, 2) AND plan_end <= ${now.toISOString()}
+    WHERE recurring_schedule_id IS NOT NULL AND status IN (1, 2) AND plan_end <= ${now.toISOString()}
     RETURNING id
   `;
   return { created, started: started.length, ended: ended.length };

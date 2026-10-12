@@ -78,6 +78,10 @@ const validateRecurringPayload = async (req, res, payload) => {
     fail(res, 400, 'Class, title, and valid weekly day/time slots are required.');
     return null;
   }
+  if ((payload?.sectionId && !sectionId) || (payload?.hostId && !hostId)) {
+    fail(res, 400, 'Choose a valid section and instructor.');
+    return null;
+  }
   try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); }
   catch { fail(res, 400, 'Choose a valid time zone.'); return null; }
   if (!(await canManageClass(req.user, classId))) {
@@ -225,9 +229,19 @@ sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHa
 sessionsRouter.post('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const values = await validateRecurringPayload(req, res, req.body || {});
   if (!values) return;
+  let hostId = values.hostId;
+  if (!hostId) {
+    const [assignedHost] = await sql`
+      SELECT u.id FROM users u JOIN teacher_courses tc ON tc.user_id = u.id
+      JOIN courses c ON c.id = tc.course_id
+      WHERE u.role = ${ROLE.TEACHER} AND u.is_active = TRUE AND c.class_id = ${values.classId}
+      ORDER BY u.id ASC LIMIT 1
+    `;
+    hostId = assignedHost?.id || null;
+  }
   const [row] = await sql`
     INSERT INTO recurring_live_schedules (class_id, section_id, course_name, title, host_id, timezone, weekly_slots, created_by)
-    VALUES (${values.classId}, ${values.sectionId}, ${values.courseName}, ${values.title}, ${values.hostId},
+    VALUES (${values.classId}, ${values.sectionId}, ${values.courseName}, ${values.title}, ${hostId},
             ${values.timezone}, ${JSON.stringify(values.weeklySlots)}::jsonb, ${req.user.id})
     RETURNING id, class_id, section_id, course_name, title, host_id, timezone, weekly_slots, enabled
   `;
@@ -247,10 +261,20 @@ sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asy
   if (!existing) return fail(res, 404, 'Recurring schedule not found.');
   const values = await validateRecurringPayload(req, res, req.body || {});
   if (!values) return;
+  let hostId = values.hostId;
+  if (!hostId) {
+    const [assignedHost] = await sql`
+      SELECT u.id FROM users u JOIN teacher_courses tc ON tc.user_id = u.id
+      JOIN courses c ON c.id = tc.course_id
+      WHERE u.role = ${ROLE.TEACHER} AND u.is_active = TRUE AND c.class_id = ${values.classId}
+      ORDER BY u.id ASC LIMIT 1
+    `;
+    hostId = assignedHost?.id || null;
+  }
   const [row] = await sql`
     UPDATE recurring_live_schedules
     SET class_id = ${values.classId}, section_id = ${values.sectionId}, course_name = ${values.courseName},
-        title = ${values.title}, host_id = ${values.hostId}, timezone = ${values.timezone},
+        title = ${values.title}, host_id = ${hostId}, timezone = ${values.timezone},
         weekly_slots = ${JSON.stringify(values.weeklySlots)}::jsonb, updated_at = NOW()
     WHERE id = ${id}
     RETURNING id
@@ -275,6 +299,14 @@ sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPER
   if (!id || typeof req.body?.enabled !== 'boolean') return fail(res, 400, 'A schedule id and enabled flag are required.');
   const [row] = await sql`UPDATE recurring_live_schedules SET enabled = ${req.body.enabled}, updated_at = NOW() WHERE id = ${id} RETURNING id, enabled`;
   if (!row) return fail(res, 404, 'Recurring schedule not found.');
+  if (!row.enabled) {
+    await sql`
+      DELETE FROM notifications WHERE related_type = 'live_session' AND related_id IN (
+        SELECT id FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()
+      )
+    `;
+    await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
+  }
   res.json({ success: true, data: row });
 }));
 
@@ -290,6 +322,30 @@ sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), 
   const [deleted] = await sql`DELETE FROM recurring_live_schedules WHERE id = ${id} RETURNING id`;
   if (!deleted) return fail(res, 404, 'Recurring schedule not found.');
   res.json({ success: true, data: { id: deleted.id, deleted: true } });
+}));
+
+sessionsRouter.get('/hosts', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const classId = req.query.classId === undefined ? null : toInt(req.query.classId);
+  if (req.query.classId !== undefined && !classId) return fail(res, 400, 'Invalid class id.');
+  const data = await sql`
+    SELECT DISTINCT u.id, u.full_name AS "fullName"
+    FROM users u
+    WHERE u.role = ${ROLE.TEACHER} AND u.is_active = TRUE
+      AND (${classId}::int IS NULL OR EXISTS (
+        SELECT 1 FROM teacher_courses tc JOIN courses c ON c.id = tc.course_id
+        WHERE tc.user_id = u.id AND c.class_id = ${classId}::int
+      ))
+    ORDER BY u.full_name ASC
+  `;
+  res.json({ success: true, data });
+}));
+
+sessionsRouter.get('/:id', asyncHandler(async (req, res) => {
+  const id = sessionIdFromReference(req.params.id);
+  const access = await getAccess(req.user, id);
+  if (access.error) return fail(res, ...access.error);
+  const [row] = await fetchSessions({ id });
+  res.json({ success: true, data: req.user.role === ROLE.STUDENT ? toStudentDto(row) : toDto(row) });
 }));
 
 const NEXT = { 1: [2, 3], 2: [3] }; // Scheduled -> Live | Ended ; Live -> Ended (LIV-3)
@@ -371,12 +427,14 @@ sessionsRouter.get('/:id/participants', requireRole(...STAFF_ROLES), asyncHandle
   const id = sessionIdFromReference(req.params.id);
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM session_joins WHERE session_id = ${id}`;
   const data = await sql`
-    SELECT u.id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", j.first_join AS "firstJoin"
+    SELECT u.id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", j.first_join AS "joinedAt"
     FROM session_joins j JOIN users u ON u.id = j.student_id
-    WHERE j.session_id = ${id} ORDER BY j.first_join ASC
+    WHERE j.session_id = ${id} ORDER BY j.first_join ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 // Optional app-level chat (LIV-10). Zoom's toolkit has its own chat, so you may delete these.
