@@ -43,7 +43,7 @@ const weekdayFor = ({ year, month, day }) => new Date(Date.UTC(year, month - 1, 
 export const runLiveSessionScheduler = async (now = new Date()) => {
   const schedules = await sql`
     SELECT id, class_id, section_id, course_name, title, host_id, timezone, weekly_slots
-    FROM recurring_live_schedules WHERE enabled = TRUE
+    FROM recurring_live_schedules WHERE enabled = TRUE AND deleted_at IS NULL
   `;
   const todayByTimezone = new Map();
   let created = 0;
@@ -84,7 +84,7 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
           )
           SELECT class_id, section_id, course_name, title, host_id, ${occurrence.start.toISOString()}, ${occurrence.end.toISOString()},
                  1, created_by, id, ${occurrence.key}
-          FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE
+          FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE AND deleted_at IS NULL
           ON CONFLICT (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL DO NOTHING
           RETURNING id, class_id, section_id, course_name, title, plan_start
         `;
@@ -103,6 +103,10 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
     UPDATE live_sessions SET status = 2, started_at = COALESCE(started_at, plan_start)
     WHERE recurring_schedule_id IS NOT NULL AND status = 1
       AND plan_start <= ${now.toISOString()} AND plan_end > ${now.toISOString()}
+      AND EXISTS (
+        SELECT 1 FROM recurring_live_schedules r
+        WHERE r.id = live_sessions.recurring_schedule_id AND r.enabled = TRUE AND r.deleted_at IS NULL
+      )
     RETURNING id, class_id, section_id, course_name, title
   `;
   for (const session of started) {

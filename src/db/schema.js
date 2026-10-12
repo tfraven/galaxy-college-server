@@ -174,11 +174,13 @@ export const initSchema = async () => {
       timezone TEXT NOT NULL DEFAULT 'Asia/Karachi',
       weekly_slots JSONB NOT NULL DEFAULT '[]'::jsonb,
       enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      deleted_at TIMESTAMPTZ,
       created_by INTEGER REFERENCES users(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await sql`ALTER TABLE recurring_live_schedules ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
   await sql`
     ALTER TABLE live_sessions
     ADD COLUMN IF NOT EXISTS recurring_schedule_id INTEGER REFERENCES recurring_live_schedules(id) ON DELETE SET NULL,

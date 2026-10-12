@@ -212,7 +212,7 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
 
 sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const pagination = getPagination(req.query);
-  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM recurring_live_schedules`;
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM recurring_live_schedules WHERE deleted_at IS NULL`;
   const rows = await sql`
     SELECT r.id, r.class_id, r.section_id, r.course_name, r.title, r.host_id,
            r.timezone, r.weekly_slots, r.enabled, c.name AS classname,
@@ -221,6 +221,7 @@ sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHa
     JOIN classes c ON c.id = r.class_id
     LEFT JOIN sections sec ON sec.id = r.section_id
     LEFT JOIN users u ON u.id = r.host_id
+    WHERE r.deleted_at IS NULL
     ORDER BY r.enabled DESC, r.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
   res.json({ success: true, data: rows.map(toRecurringDto), pagination: paginationMeta(total, pagination) });
@@ -257,7 +258,7 @@ sessionsRouter.post('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncH
 sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return fail(res, 400, 'Invalid recurring schedule id.');
-  const [existing] = await sql`SELECT id FROM recurring_live_schedules WHERE id = ${id}`;
+  const [existing] = await sql`SELECT id FROM recurring_live_schedules WHERE id = ${id} AND deleted_at IS NULL`;
   if (!existing) return fail(res, 404, 'Recurring schedule not found.');
   const values = await validateRecurringPayload(req, res, req.body || {});
   if (!values) return;
@@ -297,7 +298,7 @@ sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asy
 sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id || typeof req.body?.enabled !== 'boolean') return fail(res, 400, 'A schedule id and enabled flag are required.');
-  const [row] = await sql`UPDATE recurring_live_schedules SET enabled = ${req.body.enabled}, updated_at = NOW() WHERE id = ${id} RETURNING id, enabled`;
+  const [row] = await sql`UPDATE recurring_live_schedules SET enabled = ${req.body.enabled}, updated_at = NOW() WHERE id = ${id} AND deleted_at IS NULL RETURNING id, enabled`;
   if (!row) return fail(res, 404, 'Recurring schedule not found.');
   if (!row.enabled) {
     await sql`
@@ -306,6 +307,7 @@ sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPER
       )
     `;
     await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
+    await sql`UPDATE live_sessions SET status = 3, ended_at = NOW() WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start <= NOW()`;
   }
   res.json({ success: true, data: row });
 }));
@@ -319,7 +321,8 @@ sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), 
     )
   `;
   await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
-  const [deleted] = await sql`DELETE FROM recurring_live_schedules WHERE id = ${id} RETURNING id`;
+  await sql`UPDATE live_sessions SET status = 3, ended_at = NOW() WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start <= NOW()`;
+  const [deleted] = await sql`UPDATE recurring_live_schedules SET enabled = FALSE, deleted_at = NOW(), updated_at = NOW() WHERE id = ${id} AND deleted_at IS NULL RETURNING id`;
   if (!deleted) return fail(res, 404, 'Recurring schedule not found.');
   res.json({ success: true, data: { id: deleted.id, deleted: true } });
 }));
