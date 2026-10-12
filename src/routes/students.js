@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, toInt } from '../middleware/auth.js';
 import { generateTempPassword } from '../services/security.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 // Student management is Admin-only for writes (STU-1..9); Operators may read the list.
 export const studentsRouter = express.Router();
@@ -10,7 +11,9 @@ export const studentsRouter = express.Router();
 const MAX_BULK_ROWS = 2000; // STU-9
 const BULK_BCRYPT_COST = 8; // temp passwords must be changed at first login; keeps 2,000 hashes fast
 
-studentsRouter.get('/', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (_req, res) => {
+studentsRouter.get('/', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM students`;
   const data = await sql`
     SELECT s.user_id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", u.phone,
            s.class_id AS "classId", c.name AS "className",
@@ -19,9 +22,9 @@ studentsRouter.get('/', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(asy
     JOIN users u ON s.user_id = u.id
     JOIN classes c ON s.class_id = c.id
     LEFT JOIN sections sec ON s.section_id = sec.id
-    ORDER BY s.user_id ASC
+    ORDER BY s.user_id ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 studentsRouter.post('/', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {

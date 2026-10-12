@@ -3,6 +3,7 @@ import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageCourse, getStudentEnrolment } from '../services/access.js';
 import { notifyStudents } from '../services/notifications.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 export const testsRouter = express.Router();
 
@@ -46,7 +47,7 @@ const publishedExamNotification = (row) => {
 };
 
 // One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
-const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null } = {}) => sql`
+const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null, pagination = null } = {}) => sql`
   SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark,
          t.shuffle_q, t.shuffle_opt, t.start_at, t.end_at, t.result_mode, t.results_released, t.status,
          t.created_by, t.created_at,
@@ -64,19 +65,36 @@ const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId
           t.status = 2 AND c.class_id = ${classId}::int
           AND (t.section_id IS NULL OR t.section_id = ${sectionId}::int)))
   ORDER BY t.id DESC
+  ${pagination ? sql`LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}` : sql``}
 `;
 
 // EXM-1 / TST-6: students see only Published tests of their own class/section; staff see their scope.
 testsRouter.get('/', asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
   let rows;
+  let total = 0;
   if (req.user.role === ROLE.STUDENT) {
     const enrol = await getStudentEnrolment(req.user.id);
-    if (!enrol) return res.json({ success: true, data: [] });
-    rows = await fetchTests({ classId: enrol.class_id, sectionId: enrol.section_id });
+    if (enrol) {
+      const [{ count }] = await sql`
+        SELECT COUNT(*)::int AS count FROM tests t JOIN courses c ON c.id = t.course_id
+        WHERE t.status = 2 AND c.class_id = ${enrol.class_id}
+          AND (t.section_id IS NULL OR t.section_id = ${enrol.section_id})
+      `;
+      total = count;
+      rows = await fetchTests({ classId: enrol.class_id, sectionId: enrol.section_id, pagination });
+    } else rows = [];
   } else {
-    rows = await fetchTests({ teacherId: req.user.role === ROLE.TEACHER ? req.user.id : null });
+    const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
+    const [{ count }] = await sql`
+      SELECT COUNT(*)::int AS count FROM tests t
+      WHERE (${teacherId}::int IS NULL OR EXISTS (
+        SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
+    `;
+    total = count;
+    rows = await fetchTests({ teacherId, pagination });
   }
-  res.json({ success: true, data: rows.map(toDto) });
+  res.json({ success: true, data: rows.map(toDto), pagination: paginationMeta(total, pagination) });
 }));
 
 // Includes correct answers, so staff only.

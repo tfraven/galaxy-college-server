@@ -2,6 +2,7 @@ import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageCourse } from '../services/access.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 // CAT-3: the catalog contains correct answers, so students must never reach it.
 export const catalogRouter = express.Router();
@@ -11,6 +12,15 @@ catalogRouter.use(requireRole(...STAFF_ROLES));
 catalogRouter.get('/questions', asyncHandler(async (req, res) => {
   const courseId = toInt(req.query.courseId);
   const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
+  const pagination = getPagination(req.query);
+
+  const [{ total }] = await sql`
+    SELECT COUNT(*)::int AS total FROM questions q
+    WHERE q.is_active = TRUE
+      AND (${courseId}::int IS NULL OR q.course_id = ${courseId}::int)
+      AND (${teacherId}::int IS NULL OR EXISTS (
+            SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = q.course_id))
+  `;
 
   const data = await sql`
     SELECT q.id, q.course_id AS "courseId", q.topic, q.body, q.image,
@@ -22,9 +32,9 @@ catalogRouter.get('/questions', asyncHandler(async (req, res) => {
       AND (${courseId}::int IS NULL OR q.course_id = ${courseId}::int)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = q.course_id))
-    ORDER BY q.id DESC
+    ORDER BY q.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 catalogRouter.post('/questions', asyncHandler(async (req, res) => {

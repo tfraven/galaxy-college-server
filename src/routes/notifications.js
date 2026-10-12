@@ -1,6 +1,7 @@
 import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, toInt } from '../middleware/auth.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 export const notificationsRouter = express.Router();
 notificationsRouter.use(requireRole(ROLE.STUDENT));
@@ -25,13 +26,15 @@ notificationsRouter.post('/device', asyncHandler(async (req, res) => {
 }));
 
 notificationsRouter.get('/', asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM notifications WHERE user_id = ${req.user.id}`;
   const data = await sql`
     SELECT id, type, title, body, related_type AS "relatedType", related_id AS "relatedId",
            created_at AS "createdAt", read_at AS "readAt"
     FROM notifications WHERE user_id = ${req.user.id}
-    ORDER BY created_at DESC LIMIT 100
+    ORDER BY created_at DESC, id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  return res.json({ success: true, data });
+  return res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 notificationsRouter.get('/unread-count', asyncHandler(async (req, res) => {

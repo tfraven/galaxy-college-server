@@ -2,16 +2,19 @@ import express from 'express';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE } from '../middleware/auth.js';
 import { sendPushToUsers } from '../services/pushNotifications.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 export const announcementsRouter = express.Router();
 
-announcementsRouter.get('/', asyncHandler(async (_req, res) => {
+announcementsRouter.get('/', asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM announcements`;
   const data = await sql`
     SELECT a.id, a.title, a.body, a.created_at AS "createdAt", u.full_name AS "authorName"
     FROM announcements a JOIN users u ON u.id = a.created_by
-    ORDER BY a.created_at DESC LIMIT 100
+    ORDER BY a.created_at DESC, a.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  return res.json({ success: true, data });
+  return res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 announcementsRouter.post('/', requireRole(ROLE.ADMIN, ROLE.TEACHER), asyncHandler(async (req, res) => {
@@ -47,4 +50,12 @@ announcementsRouter.post('/', requireRole(ROLE.ADMIN, ROLE.TEACHER), asyncHandle
     relatedId: announcement.id,
   });
   return res.status(201).json({ success: true, data: announcement });
+}));
+
+announcementsRouter.delete('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, 'Invalid announcement id.');
+  const [deleted] = await sql`DELETE FROM announcements WHERE id = ${id} RETURNING id`;
+  if (!deleted) return fail(res, 404, 'Announcement not found.');
+  return res.json({ success: true, data: { id: deleted.id, deleted: true } });
 }));

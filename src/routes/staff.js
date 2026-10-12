@@ -3,18 +3,21 @@ import bcrypt from 'bcryptjs';
 import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, toInt } from '../middleware/auth.js';
 import { generateTempPassword } from '../services/security.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 // Admin only (STF-1). Mounted behind authenticate.
 export const staffRouter = express.Router();
 staffRouter.use(requireRole(ROLE.ADMIN));
 
-staffRouter.get('/', asyncHandler(async (_req, res) => {
+staffRouter.get('/', asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM users WHERE role IN (2, 3)`;
   const data = await sql`
     SELECT id, role, username, full_name AS "fullName", phone,
            is_active AS "isActive", must_change_pw AS "mustChangePw"
-    FROM users WHERE role IN (2, 3) ORDER BY id ASC
+    FROM users WHERE role IN (2, 3) ORDER BY id ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 staffRouter.post('/', asyncHandler(async (req, res) => {

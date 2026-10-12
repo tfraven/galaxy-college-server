@@ -4,6 +4,7 @@ import { asyncHandler, fail, isStaff, requireRole, ROLE, STAFF_ROLES, toInt } fr
 import { canManageClass, getStudentEnrolment } from '../services/access.js';
 import { notifyStudents } from '../services/notifications.js';
 import { generateVideoSdkToken, sessionIdFromReference, sessionNameFor, sessionReferenceFor } from '../services/zoom.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 export const sessionsRouter = express.Router();
 
@@ -38,7 +39,7 @@ const toStudentDto = (s) => ({
   endedAt: s.ended_at,
 });
 
-const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId = null } = {}) => sql`
+const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId = null, pagination = null } = {}) => sql`
   SELECT s.id, s.class_id, s.section_id, s.course_name, s.title, s.host_id, s.plan_start, s.plan_end,
          s.status, s.started_at, s.ended_at, s.created_by,
          c.name AS classname, sec.name AS sectionname, u.full_name AS hostname,
@@ -56,6 +57,7 @@ const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId 
           SELECT 1 FROM courses co JOIN teacher_courses tc ON tc.course_id = co.id
           WHERE co.class_id = s.class_id AND tc.user_id = ${teacherId}::int))
   ORDER BY s.status ASC, s.plan_start ASC
+  ${pagination ? sql`LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}` : sql``}
 `;
 
 /**
@@ -79,14 +81,35 @@ const getAccess = async (user, sessionId) => {
 };
 
 sessionsRouter.get('/', asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
   let rows;
+  let total;
   if (req.user.role === ROLE.STUDENT) {
     const enrol = await getStudentEnrolment(req.user.id);
-    rows = enrol ? await fetchSessions({ classId: enrol.class_id, sectionId: enrol.section_id }) : [];
+    if (enrol) {
+      const [{ count }] = await sql`
+        SELECT COUNT(*)::int AS count FROM live_sessions s
+        WHERE s.class_id = ${enrol.class_id} AND (s.section_id IS NULL OR s.section_id = ${enrol.section_id})
+          AND (s.status < 3 OR s.ended_at > NOW() - INTERVAL '1 day')
+      `;
+      total = count;
+      rows = await fetchSessions({ classId: enrol.class_id, sectionId: enrol.section_id, pagination });
+    } else {
+      total = 0;
+      rows = [];
+    }
   } else {
-    rows = await fetchSessions({ teacherId: req.user.role === ROLE.TEACHER ? req.user.id : null });
+    const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
+    const [{ count }] = await sql`
+      SELECT COUNT(*)::int AS count FROM live_sessions s
+      WHERE (${teacherId}::int IS NULL OR s.host_id = ${teacherId}::int OR s.created_by = ${teacherId}::int OR EXISTS (
+        SELECT 1 FROM courses co JOIN teacher_courses tc ON tc.course_id = co.id
+        WHERE co.class_id = s.class_id AND tc.user_id = ${teacherId}::int))
+    `;
+    total = count;
+    rows = await fetchSessions({ teacherId, pagination });
   }
-  res.json({ success: true, data: rows.map(req.user.role === ROLE.STUDENT ? toStudentDto : toDto) });
+  res.json({ success: true, data: rows.map(req.user.role === ROLE.STUDENT ? toStudentDto : toDto), pagination: paginationMeta(total, pagination) });
 }));
 
 // LIV-1: schedule. No Zoom link/ID needed: the room is derived from the session id.

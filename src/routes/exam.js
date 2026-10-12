@@ -3,6 +3,7 @@ import { sql } from '../db/connection.js';
 import { asyncHandler, fail, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageCourse, getStudentEnrolment } from '../services/access.js';
 import { describeAttempt, finalizeAttempt, resultsVisible, seededShuffle } from '../services/grading.js';
+import { getPagination, paginationMeta } from '../middleware/pagination.js';
 
 export const examRouter = express.Router();
 
@@ -196,6 +197,13 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
   const studentId = toInt(req.params.studentId);
   if (req.user.role === ROLE.STUDENT && studentId !== req.user.id) return fail(res, 403, 'You can only view your own results.');
   const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`
+    SELECT COUNT(*)::int AS total FROM attempts a JOIN tests t ON a.test_id = t.id
+    WHERE a.student_id = ${studentId}
+      AND (${teacherId}::int IS NULL OR EXISTS (
+            SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
+  `;
 
   const rows = await sql`
     SELECT a.*, t.title, t.mark_per_q, t.result_mode, t.results_released, t.status, t.end_at,
@@ -204,7 +212,7 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
     WHERE a.student_id = ${studentId}
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
-    ORDER BY a.id DESC
+    ORDER BY a.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
 
   const data = rows.map((a) => {
@@ -212,7 +220,7 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
     const visible = req.user.role !== ROLE.STUDENT || resultsVisible(a);
     return { ...publicResult(dto, visible), testTitle: a.title, startedAt: a.started_at, deadlineAt: a.deadline_at };
   });
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 // RES-5: staff result list with rank.
@@ -223,16 +231,20 @@ examRouter.get('/test-attempts/:testId', requireRole(...STAFF_ROLES), asyncHandl
   if (!(await canManageCourse(req.user, test.course_id))) return fail(res, 403, 'Not your course.');
 
   const [{ n: questionCount }] = await sql`SELECT COUNT(*)::int AS n FROM test_questions WHERE test_id = ${testId}`;
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM attempts WHERE test_id = ${testId}`;
   const rows = await sql`
-    SELECT a.*, u.username AS roll_no, u.full_name
+    SELECT a.*, u.username AS roll_no, u.full_name,
+           RANK() OVER (ORDER BY a.score DESC NULLS LAST, a.submitted_at ASC) AS rank
     FROM attempts a JOIN users u ON a.student_id = u.id
     WHERE a.test_id = ${testId} ORDER BY a.score DESC NULLS LAST, a.submitted_at ASC
+    LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
 
   const data = rows.map((a, i) => ({
     ...describeAttempt(a, test, questionCount),
     rollNo: a.roll_no, fullName: a.full_name, startedAt: a.started_at,
-    rank: a.submitted_at ? i + 1 : null,
+    rank: a.submitted_at ? Number(a.rank) : null,
   }));
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
