@@ -337,8 +337,23 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     WHERE st.class_id = ${group.class_id} AND u.is_active = TRUE
     ORDER BY u.full_name, u.username
   `;
-  const attempts = await sql`SELECT id, student_id, submitted_at FROM attempts WHERE test_id = ${master.id}`;
-  const attemptByStudent = new Map(attempts.map((attempt) => [attempt.student_id, attempt]));
+  const testById = new Map(groupTests.map((test) => [test.id, test]));
+  const testIds = groupTests.map((test) => test.id);
+  const attempts = await sql`
+    SELECT id, test_id, student_id, submitted_at
+    FROM attempts WHERE test_id = ANY(${testIds}::int[])
+  `;
+  const attemptsByStudent = new Map();
+  for (const attempt of attempts) {
+    const test = testById.get(attempt.test_id);
+    if (!test) continue;
+    if (!attemptsByStudent.has(attempt.student_id)) {
+      attemptsByStudent.set(attempt.student_id, { master: null, subjects: new Map() });
+    }
+    const studentAttempts = attemptsByStudent.get(attempt.student_id);
+    if (test.grand_test_order === 0) studentAttempts.master = attempt;
+    else studentAttempts.subjects.set(test.course_id, attempt);
+  }
   const attemptIds = attempts.map((attempt) => attempt.id);
   const answers = attemptIds.length ? await sql`
     SELECT attempt_id, question_id, chosen FROM attempt_answers WHERE attempt_id = ANY(${attemptIds}::int[])
@@ -352,8 +367,22 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
   for (const question of questions) questionBySubject.get(question.course_id)?.push(question);
 
   const reportRows = students.map((student) => {
-    const attempt = attemptByStudent.get(student.id) || null;
-    const studentAnswers = attempt ? answerByAttempt.get(attempt.id) || new Map() : new Map();
+    const studentAttempts = attemptsByStudent.get(student.id) || { master: null, subjects: new Map() };
+    const masterAttempt = studentAttempts.master;
+    const subjectAttempts = studentAttempts.subjects;
+    const submittedMaster = Boolean(masterAttempt?.submitted_at);
+    const submittedAllLegacySubjects = subjects.length > 0 && subjects.every((subject) => subjectAttempts.get(subject.id)?.submitted_at);
+    const submittedAt = masterAttempt
+      ? masterAttempt.submitted_at || null
+      : (submittedAllLegacySubjects
+        ? [...subjectAttempts.values()].reduce((latest, attempt) => !latest || new Date(attempt.submitted_at) > new Date(latest)
+          ? attempt.submitted_at : latest, null)
+        : null);
+    const studentAnswers = new Map();
+    const attemptsToRead = masterAttempt ? [masterAttempt] : [...subjectAttempts.values()];
+    for (const attempt of attemptsToRead) {
+      for (const [questionId, chosen] of answerByAttempt.get(attempt.id) || []) studentAnswers.set(questionId, chosen);
+    }
     const subjectResults = {};
     let totalCorrect = 0;
     let totalWrong = 0;
@@ -373,7 +402,11 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
       totalWrong += wrong;
       totalUnanswered += unanswered;
       const rawScore = correct * Number(group.mark_per_q) - wrong * Number(group.neg_mark);
-      const score = attempt?.submitted_at ? Math.max(0, Math.round(rawScore * 100) / 100) : null;
+      const subjectAttempt = subjectAttempts.get(subject.id);
+      const subjectSubmitted = masterAttempt
+        ? submittedMaster
+        : Boolean(subjectAttempt?.submitted_at);
+      const score = subjectSubmitted ? Math.max(0, Math.round(rawScore * 100) / 100) : null;
       subjectResults[subject.id] = {
         correct, wrong, unanswered, score, maxMarks: subject.maxMarks,
         percentage: score === null || !subject.maxMarks ? null : Math.round((score / subject.maxMarks) * 100), rank: null,
@@ -384,7 +417,7 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     const overallScore = attempt?.submitted_at ? Math.max(0, Math.round(rawOverallScore * 100) / 100) : null;
     return {
       studentId: student.id, rollNo: student.roll_no, fullName: student.full_name,
-      attempted: Boolean(attempt), submittedAt: attempt?.submitted_at || null,
+      attempted: Boolean(masterAttempt || subjectAttempts.size), submittedAt,
       subjects: subjectResults,
       overall: {
         correct: totalCorrect, wrong: totalWrong, unanswered: totalUnanswered,
@@ -395,7 +428,7 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     };
   });
   const assignRanks = (scoreOf, assign) => {
-    const ranked = reportRows.filter((row) => row.submittedAt).sort((a, b) =>
+    const ranked = reportRows.filter((row) => scoreOf(row) !== null).sort((a, b) =>
       scoreOf(b) - scoreOf(a) || a.rollNo.localeCompare(b.rollNo));
     let rank = 0;
     let previousScore = null;
