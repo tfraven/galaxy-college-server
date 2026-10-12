@@ -60,7 +60,7 @@ export const authenticate = asyncHandler(async (req, res, next) => {
         role: user.role,
         username: user.username,
         fullName: user.full_name,
-        mustChangePw: user.must_change_pw,
+        mustChangePw: false,
         tokenVersion: user.token_version,
         deviceId: typeof decoded.dev === 'string' ? decoded.dev : legacyDeviceId,
         legacyDeviceId,

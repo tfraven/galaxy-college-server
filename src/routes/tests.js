@@ -10,7 +10,11 @@ export const testsRouter = express.Router();
 const toDto = (t) => ({
   id: t.id,
   courseId: t.course_id,
-  courseName: `${t.subjectname} (${t.classname})`,
+  courseName: t.grand_test_order === 0
+    ? `${t.classname} · ${t.grand_subject_count || 0} subjects`
+    : `${t.subjectname} (${t.classname})`,
+  subjectNames: t.grand_test_order === 0 ? (t.grand_subject_names || []) : [],
+  subjectCount: t.grand_test_order === 0 ? Number(t.grand_subject_count || 0) : null,
   sectionId: t.section_id,
   sectionName: t.sectionname || 'All Sections',
   title: t.title,
@@ -33,6 +37,18 @@ const toDto = (t) => ({
 });
 
 const publishedExamNotification = (row) => {
+  if (row.grand_test_order === 0) {
+    const startAt = row.start_at ?? row.startAt;
+    const startDate = startAt ? new Date(startAt) : null;
+    const availableFrom = startDate && !Number.isNaN(startDate.getTime())
+      ? ` from ${startDate.toLocaleString()}`
+      : '';
+    return {
+      type: 'exam_published',
+      title: `Grand Test published: ${row.title}`,
+      body: `${row.classname} · ${row.grand_subject_count} subjects is available${availableFrom}.`,
+    };
+  }
   const courseName = row.subjectname
     ? `${row.subjectname}${row.classname ? ` (${row.classname})` : ''}`
     : `Exam "${row.title}"`;
@@ -50,11 +66,16 @@ const publishedExamNotification = (row) => {
 };
 
 // One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
-const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, classId = null, sectionId = null, courseId = null, searchPattern = null, pagination = null } = {}) => sql`
+const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, classId = null, sectionId = null, courseId = null, searchPattern = null, pagination = null, summaryOnly = false } = {}) => sql`
   SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark, t.test_type, t.grand_test_id, t.grand_test_order,
          t.shuffle_q, t.shuffle_opt, t.start_at, t.end_at, t.result_mode, t.results_released, t.status,
          t.created_by, t.created_at,
-         s.name AS subjectname, cl.name AS classname, sec.name AS sectionname,
+         s.name AS subjectname, cl.name AS classname, c.class_id, sec.name AS sectionname,
+         (SELECT COUNT(*)::int FROM tests child WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0) AS grand_subject_count,
+         COALESCE((SELECT array_agg(subject.name ORDER BY child.grand_test_order)
+                   FROM tests child JOIN courses child_course ON child_course.id = child.course_id
+                   JOIN subjects subject ON subject.id = child_course.subject_id
+                   WHERE child.grand_test_id = t.grand_test_id AND child.grand_test_order > 0), '{}') AS grand_subject_names,
          COALESCE((SELECT array_agg(tq.question_id ORDER BY tq.question_order NULLS LAST, tq.question_id) FROM test_questions tq WHERE tq.test_id = t.id), '{}') AS question_ids
   FROM tests t
   JOIN courses c ON t.course_id = c.id
@@ -70,6 +91,7 @@ const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, class
           AND (t.section_id IS NULL OR t.section_id = ${sectionId}::int)))
     AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
     AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
+    AND (${summaryOnly}::boolean = FALSE OR t.grand_test_id IS NULL OR t.grand_test_order = 0)
   ORDER BY CASE WHEN ${grandTestId}::int IS NOT NULL THEN t.grand_test_order END ASC NULLS LAST,
            CASE WHEN t.grand_test_id IS NULL THEN t.id
                 ELSE (SELECT MAX(child.id) FROM tests child WHERE child.grand_test_id = t.grand_test_id) END DESC,
@@ -89,9 +111,10 @@ testsRouter.get('/', asyncHandler(async (req, res) => {
         SELECT COUNT(*)::int AS count FROM tests t JOIN courses c ON c.id = t.course_id
         WHERE t.status = 2 AND c.class_id = ${enrol.class_id}
           AND (t.section_id IS NULL OR t.section_id = ${enrol.section_id})
+          AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
       `;
       total = count;
-      rows = await fetchTests({ classId: enrol.class_id, sectionId: enrol.section_id, pagination });
+      rows = await fetchTests({ classId: enrol.class_id, sectionId: enrol.section_id, pagination, summaryOnly: true });
     } else rows = [];
   } else {
     const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
@@ -108,14 +131,15 @@ testsRouter.get('/', asyncHandler(async (req, res) => {
         SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
         AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
         AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
+        AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
     `;
     total = count;
-    rows = await fetchTests({ teacherId, courseId, searchPattern, pagination });
+    rows = await fetchTests({ teacherId, courseId, searchPattern, pagination, summaryOnly: true });
   }
   res.json({ success: true, data: rows.map(toDto), pagination: paginationMeta(total, pagination) });
 }));
 
-// A Grand Test is one scheduled assessment made up of one independently graded test per class subject.
+// A Grand Test is one student-facing assessment with internally grouped subject papers.
 testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const classId = toInt(req.body?.classId);
   const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
@@ -183,6 +207,23 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
       VALUES (${classId}, ${title}, ${durationMin}, ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
               ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${status}, ${req.user.id}, ${subjectOrder}::jsonb)
       RETURNING id
+    ), master_test AS (
+      INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
+                         start_at, end_at, result_mode, results_released, status, created_by, test_type, grand_test_id, grand_test_order)
+      SELECT c.id, NULL, ${title}, ${durationMin}, ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
+             ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${resultMode !== 3}, ${status}, ${req.user.id},
+             'grand_test', g.id, 0
+      FROM g JOIN requested ON requested.sort_order = 1
+      JOIN courses c ON c.id = requested.course_id AND c.class_id = ${classId}
+      RETURNING id
+    ), master_questions AS (
+      INSERT INTO test_questions (test_id, question_id, question_order)
+      SELECT master_test.id, selected.question_id::int,
+             ROW_NUMBER() OVER (ORDER BY requested.sort_order, selected.question_order)::int
+      FROM master_test CROSS JOIN requested
+      CROSS JOIN LATERAL jsonb_array_elements_text(requested.question_ids) WITH ORDINALITY
+        AS selected(question_id, question_order)
+      RETURNING test_id
     ), subject_tests AS (
       INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
                          start_at, end_at, result_mode, results_released, status, created_by, test_type, grand_test_id, grand_test_order)
@@ -205,14 +246,16 @@ testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
     SELECT id FROM g
   `;
   const created = await fetchTests({ grandTestId });
+  const master = created.find((row) => row.grand_test_order === 0);
+  if (!master) throw new Error('Grand Test master record was not created.');
   if (status === 2) {
-    for (const row of created) {
-      const [course] = await sql`SELECT class_id FROM courses WHERE id = ${row.course_id}`;
-      await notifyStudents({ ...publishedExamNotification(row), relatedType: 'test', relatedId: row.id,
-        eventKey: `exam_published:${row.id}`, classId: course.class_id });
-    }
+    await notifyStudents({ ...publishedExamNotification(master), relatedType: 'test', relatedId: master.id,
+      eventKey: `grand_test_published:${grandTestId}`, classId: master.class_id });
   }
-  res.status(201).json({ success: true, data: { id: grandTestId, title, classId, subjectCount: subjects.length, tests: created.map(toDto) } });
+  res.status(201).json({ success: true, data: {
+    id: grandTestId, title, classId, subjectCount: subjects.length, test: toDto(master),
+    subjects: created.filter((row) => row.grand_test_order > 0).map(toDto),
+  } });
 }));
 
 testsRouter.get('/grand/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
@@ -220,9 +263,11 @@ testsRouter.get('/grand/:id', requireRole(...STAFF_ROLES), asyncHandler(async (r
   const [group] = await sql`SELECT g.*, c.name AS class_name FROM grand_test_groups g JOIN classes c ON c.id = g.class_id WHERE g.id = ${id}`;
   if (!group) return fail(res, 404, 'Grand Test not found.');
   const rows = await fetchTests({ grandTestId: group.id });
+  const master = rows.find((row) => row.grand_test_order === 0);
   res.json({ success: true, data: { id: group.id, title: group.title, classId: group.class_id,
     className: group.class_name, startAt: group.start_at, endAt: group.end_at,
-    status: group.status, subjectOrder: group.subject_order || [], subjects: rows.map(toDto) } });
+    status: group.status, subjectOrder: group.subject_order || [], test: master ? toDto(master) : null,
+    subjects: rows.filter((row) => row.grand_test_order > 0).map(toDto) } });
 }));
 
 // Includes correct answers, so staff only.

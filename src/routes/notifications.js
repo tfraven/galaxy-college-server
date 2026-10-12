@@ -27,18 +27,75 @@ notificationsRouter.post('/device', asyncHandler(async (req, res) => {
 
 notificationsRouter.get('/', asyncHandler(async (req, res) => {
   const pagination = getPagination(req.query);
-  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM notifications WHERE user_id = ${req.user.id}`;
+  const [{ total }] = await sql`
+    SELECT COUNT(*)::int AS total FROM notifications n
+    WHERE n.user_id = ${req.user.id}
+      AND (
+        n.related_type = 'announcement'
+        OR (n.related_type = 'test' AND EXISTS (
+          SELECT 1 FROM tests t JOIN courses c ON c.id = t.course_id
+          LEFT JOIN grand_test_groups g ON g.id = t.grand_test_id
+          JOIN students st ON st.user_id = n.user_id
+          WHERE t.id = n.related_id
+            AND COALESCE(g.class_id, c.class_id) = st.class_id
+            AND (t.section_id IS NULL OR t.section_id = st.section_id)
+        ))
+        OR (n.related_type = 'live_session' AND EXISTS (
+          SELECT 1 FROM live_sessions s JOIN students st ON st.user_id = n.user_id
+          WHERE s.id = n.related_id AND s.deleted_at IS NULL
+            AND s.class_id = st.class_id
+            AND (s.section_id IS NULL OR s.section_id = st.section_id)
+        ))
+      )
+  `;
   const data = await sql`
     SELECT id, type, title, body, related_type AS "relatedType", related_id AS "relatedId",
            created_at AS "createdAt", read_at AS "readAt"
-    FROM notifications WHERE user_id = ${req.user.id}
+    FROM notifications n WHERE n.user_id = ${req.user.id}
+      AND (
+        n.related_type = 'announcement'
+        OR (n.related_type = 'test' AND EXISTS (
+          SELECT 1 FROM tests t JOIN courses c ON c.id = t.course_id
+          LEFT JOIN grand_test_groups g ON g.id = t.grand_test_id
+          JOIN students st ON st.user_id = n.user_id
+          WHERE t.id = n.related_id
+            AND COALESCE(g.class_id, c.class_id) = st.class_id
+            AND (t.section_id IS NULL OR t.section_id = st.section_id)
+        ))
+        OR (n.related_type = 'live_session' AND EXISTS (
+          SELECT 1 FROM live_sessions s JOIN students st ON st.user_id = n.user_id
+          WHERE s.id = n.related_id AND s.deleted_at IS NULL
+            AND s.class_id = st.class_id
+            AND (s.section_id IS NULL OR s.section_id = st.section_id)
+        ))
+      )
     ORDER BY created_at DESC, id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
   return res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 notificationsRouter.get('/unread-count', asyncHandler(async (req, res) => {
-  const [row] = await sql`SELECT COUNT(*)::int AS count FROM notifications WHERE user_id = ${req.user.id} AND read_at IS NULL`;
+  const [row] = await sql`
+    SELECT COUNT(*)::int AS count FROM notifications n
+    WHERE n.user_id = ${req.user.id} AND n.read_at IS NULL
+      AND (
+        n.related_type = 'announcement'
+        OR (n.related_type = 'test' AND EXISTS (
+          SELECT 1 FROM tests t JOIN courses c ON c.id = t.course_id
+          LEFT JOIN grand_test_groups g ON g.id = t.grand_test_id
+          JOIN students st ON st.user_id = n.user_id
+          WHERE t.id = n.related_id
+            AND COALESCE(g.class_id, c.class_id) = st.class_id
+            AND (t.section_id IS NULL OR t.section_id = st.section_id)
+        ))
+        OR (n.related_type = 'live_session' AND EXISTS (
+          SELECT 1 FROM live_sessions s JOIN students st ON st.user_id = n.user_id
+          WHERE s.id = n.related_id AND s.deleted_at IS NULL
+            AND s.class_id = st.class_id
+            AND (s.section_id IS NULL OR s.section_id = st.section_id)
+        ))
+      )
+  `;
   return res.json({ success: true, data: { count: row.count } });
 }));
 
@@ -46,8 +103,25 @@ notificationsRouter.patch('/:id/read', asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return fail(res, 400, 'Invalid notification.');
   const [row] = await sql`
-    UPDATE notifications SET read_at = COALESCE(read_at, NOW())
-    WHERE id = ${id} AND user_id = ${req.user.id}
+    UPDATE notifications n SET read_at = COALESCE(n.read_at, NOW())
+    WHERE n.id = ${id} AND n.user_id = ${req.user.id}
+      AND (
+        n.related_type = 'announcement'
+        OR (n.related_type = 'test' AND EXISTS (
+          SELECT 1 FROM tests t JOIN courses c ON c.id = t.course_id
+          LEFT JOIN grand_test_groups g ON g.id = t.grand_test_id
+          JOIN students st ON st.user_id = n.user_id
+          WHERE t.id = n.related_id
+            AND COALESCE(g.class_id, c.class_id) = st.class_id
+            AND (t.section_id IS NULL OR t.section_id = st.section_id)
+        ))
+        OR (n.related_type = 'live_session' AND EXISTS (
+          SELECT 1 FROM live_sessions s JOIN students st ON st.user_id = n.user_id
+          WHERE s.id = n.related_id AND s.deleted_at IS NULL
+            AND s.class_id = st.class_id
+            AND (s.section_id IS NULL OR s.section_id = st.section_id)
+        ))
+      )
     RETURNING id, read_at AS "readAt"
   `;
   if (!row) return fail(res, 404, 'Notification not found.');
@@ -55,6 +129,27 @@ notificationsRouter.patch('/:id/read', asyncHandler(async (req, res) => {
 }));
 
 notificationsRouter.post('/read-all', asyncHandler(async (req, res) => {
-  const rows = await sql`UPDATE notifications SET read_at = NOW() WHERE user_id = ${req.user.id} AND read_at IS NULL RETURNING id`;
+  const rows = await sql`
+    UPDATE notifications n SET read_at = NOW()
+    WHERE n.user_id = ${req.user.id} AND n.read_at IS NULL
+      AND (
+        n.related_type = 'announcement'
+        OR (n.related_type = 'test' AND EXISTS (
+          SELECT 1 FROM tests t JOIN courses c ON c.id = t.course_id
+          LEFT JOIN grand_test_groups g ON g.id = t.grand_test_id
+          JOIN students st ON st.user_id = n.user_id
+          WHERE t.id = n.related_id
+            AND COALESCE(g.class_id, c.class_id) = st.class_id
+            AND (t.section_id IS NULL OR t.section_id = st.section_id)
+        ))
+        OR (n.related_type = 'live_session' AND EXISTS (
+          SELECT 1 FROM live_sessions s JOIN students st ON st.user_id = n.user_id
+          WHERE s.id = n.related_id AND s.deleted_at IS NULL
+            AND s.class_id = st.class_id
+            AND (s.section_id IS NULL OR s.section_id = st.section_id)
+        ))
+      )
+    RETURNING n.id
+  `;
   return res.json({ success: true, data: { updated: rows.length } });
 }));
