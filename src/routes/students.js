@@ -143,6 +143,23 @@ studentsRouter.post('/commit-bulk', requireRole(ROLE.ADMIN), asyncHandler(async 
   res.json({ success: true, data: { importedCount: rows.length, credentials } });
 }));
 
+studentsRouter.get('/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (id === null) return fail(res, 400, 'Invalid student id');
+  const [student] = await sql`
+    SELECT s.user_id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", u.phone,
+           s.class_id AS "classId", c.name AS "className",
+           s.section_id AS "sectionId", sec.name AS "sectionName", u.is_active AS "isActive"
+    FROM students s
+    JOIN users u ON s.user_id = u.id
+    JOIN classes c ON s.class_id = c.id
+    LEFT JOIN sections sec ON s.section_id = sec.id
+    WHERE s.user_id = ${id}
+  `;
+  if (!student) return fail(res, 404, 'Student not found');
+  res.json({ success: true, data: student });
+}));
+
 studentsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   const { fullName, phone, classId, sectionId } = req.body || {};
