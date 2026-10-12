@@ -11,7 +11,7 @@ import { sql } from './db/connection.js';
 import { initSchema } from './db/schema.js';
 import { forceLegacyDemoPasswordChange } from './db/securityMigrations.js';
 import { seedDatabase } from './db/seed.js';
-import { authenticate } from './middleware/auth.js';
+import { authenticate, requireRole, ROLE } from './middleware/auth.js';
 import { finalizeAttempt } from './services/grading.js';
 import { zoomConfigured } from './services/zoom.js';
 import { runLiveSessionScheduler } from './services/liveSessionScheduler.js';
@@ -312,45 +312,53 @@ app.use(
 );
 
 // Everything below requires authentication.
+const standardPortalRole = requireRole(ROLE.ADMIN, ROLE.OPERATOR, ROLE.TEACHER, ROLE.STUDENT);
 app.use(
   '/api/v1/master',
   authenticate,
+  standardPortalRole,
   masterRouter
 );
 
 app.use(
   '/api/v1/students',
   authenticate,
+  standardPortalRole,
   studentsRouter
 );
 
 app.use(
   '/api/v1/staff',
   authenticate,
+  standardPortalRole,
   staffRouter
 );
 
 app.use(
   '/api/v1/users',
   authenticate,
+  standardPortalRole,
   usersRouter
 );
 
 app.use(
   '/api/v1/catalog',
   authenticate,
+  standardPortalRole,
   catalogRouter
 );
 
 app.use(
   '/api/v1/tests',
   authenticate,
+  standardPortalRole,
   testsRouter
 );
 
 app.use(
   '/api/v1/exam',
   authenticate,
+  standardPortalRole,
   examRouter
 );
 
@@ -360,7 +368,7 @@ app.use(
   sessionsRouter
 );
 
-app.use('/api/v1/announcements', authenticate, announcementsRouter);
+app.use('/api/v1/announcements', authenticate, standardPortalRole, announcementsRouter);
 
 app.use('/api/v1/notifications', authenticate, notificationsRouter);
 

@@ -32,6 +32,7 @@ const toDto = (s) => ({
   startedAt: s.started_at,
   endedAt: s.ended_at,
   participantCount: parseInt(s.participant_count, 10) || 0,
+  videoEnabled: s.video_enabled !== false,
 });
 
 // Student payloads only include a public join handle and the details needed to choose a class.
@@ -120,6 +121,7 @@ const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId 
   LEFT JOIN sections sec ON s.section_id = sec.id
   LEFT JOIN users u ON s.host_id = u.id
   WHERE (${id}::int IS NULL OR s.id = ${id}::int)
+    AND s.deleted_at IS NULL
     AND (${classId}::int IS NULL OR (
           s.class_id = ${classId}::int
           AND (s.section_id IS NULL OR s.section_id = ${sectionId}::int)
@@ -137,12 +139,17 @@ const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId 
  */
 const getAccess = async (user, sessionId) => {
   const [session] = await sql`SELECT * FROM live_sessions WHERE id = ${sessionId}`;
-  if (!session) return { error: [404, 'Session not found'] };
+  if (!session || session.deleted_at) return { error: [404, 'Session not found'] };
 
   if (isStaff(user)) {
     const manages = user.role !== ROLE.TEACHER || user.id === session.host_id || (await canManageClass(user, session.class_id));
     if (!manages) return { error: [403, 'You are not assigned to this class.'] };
     return { session, isHost: true };
+  }
+
+  if (user.role === ROLE.VIDEO_PARTICIPANT) {
+    if (!session.video_enabled) return { error: [403, 'Video participants are not enabled for this class.'] };
+    return { session, isHost: false };
   }
 
   const enrol = await getStudentEnrolment(user.id);
@@ -169,6 +176,19 @@ sessionsRouter.get('/', asyncHandler(async (req, res) => {
       total = 0;
       rows = [];
     }
+  } else if (req.user.role === ROLE.VIDEO_PARTICIPANT) {
+    const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM live_sessions WHERE video_enabled = TRUE AND deleted_at IS NULL AND (status < 3 OR ended_at > NOW() - INTERVAL '1 day')`;
+    total = count;
+    rows = await sql`
+      SELECT s.id, s.class_id, s.section_id, s.course_name, s.title, s.host_id, s.plan_start, s.plan_end,
+             s.status, s.started_at, s.ended_at, s.created_by, s.video_enabled,
+             c.name AS classname, sec.name AS sectionname, u.full_name AS hostname,
+             (SELECT COUNT(*)::int FROM session_joins WHERE session_id = s.id) AS participant_count
+      FROM live_sessions s JOIN classes c ON c.id = s.class_id
+      LEFT JOIN sections sec ON sec.id = s.section_id LEFT JOIN users u ON u.id = s.host_id
+      WHERE s.video_enabled = TRUE AND s.deleted_at IS NULL AND (s.status < 3 OR s.ended_at > NOW() - INTERVAL '1 day')
+      ORDER BY s.status ASC, s.plan_start ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
+    `;
   } else {
     const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
     const [{ count }] = await sql`
@@ -185,7 +205,7 @@ sessionsRouter.get('/', asyncHandler(async (req, res) => {
 
 // LIV-1: schedule. No Zoom link/ID needed: the room is derived from the session id.
 sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
-  const { classId, sectionId, courseName, title, hostId, planStart, planEnd } = req.body || {};
+  const { classId, sectionId, courseName, title, hostId, planStart, planEnd, videoEnabled = true } = req.body || {};
   if (!classId || !title?.trim()) return fail(res, 400, 'Class and title are required');
   if (!(await canManageClass(req.user, classId))) return fail(res, 403, 'You are not assigned to this class.');
 
@@ -203,9 +223,9 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
   const finalHost = req.user.role === ROLE.TEACHER ? req.user.id : hostId || null;
 
   const [{ id }] = await sql`
-    INSERT INTO live_sessions (class_id, section_id, course_name, title, host_id, plan_start, plan_end, status, created_by)
+    INSERT INTO live_sessions (class_id, section_id, course_name, title, host_id, plan_start, plan_end, status, created_by, video_enabled)
     VALUES (${classId}, ${sectionId || null}, ${courseName || 'General'}, ${title.trim()}, ${finalHost},
-            ${start.toISOString()}, ${end.toISOString()}, 1, ${req.user.id})
+            ${start.toISOString()}, ${end.toISOString()}, 1, ${req.user.id}, ${Boolean(videoEnabled)})
     RETURNING id
   `;
   const [row] = await fetchSessions({ id });
@@ -379,6 +399,10 @@ sessionsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(as
 
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
+  if (status === 3) {
+    if (req.user.role !== ROLE.ADMIN) return fail(res, 403, 'Only an administrator can end a live session.');
+    if (req.body?.confirmTitle !== access.session.title) return fail(res, 400, 'Type the exact session name to confirm ending it.');
+  }
   if (status !== access.session.status && !NEXT[access.session.status]?.includes(status)) {
     return fail(res, 400, 'A class can go Scheduled -> Live -> Ended, and an ended class cannot be reopened.');
   }
@@ -396,6 +420,16 @@ sessionsRouter.patch('/:id/status', requireRole(...STAFF_ROLES), asyncHandler(as
     });
   }
   res.json({ success: true, data: toDto(row) });
+}));
+
+sessionsRouter.delete('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  const id = sessionIdFromReference(req.params.id);
+  const access = await getAccess(req.user, id);
+  if (access.error) return fail(res, ...access.error);
+  if (req.body?.confirmTitle !== access.session.title) return fail(res, 400, 'Type the exact session name to confirm deleting it.');
+  await sql`UPDATE live_sessions SET status = 3, ended_at = COALESCE(ended_at, NOW()), deleted_at = NOW() WHERE id = ${id}`;
+  await sql`DELETE FROM notifications WHERE related_type = 'live_session' AND related_id = ${id}`;
+  res.json({ success: true, data: { id, deleted: true } });
 }));
 
 /**
@@ -460,7 +494,7 @@ sessionsRouter.get('/:id/participants', requireRole(...STAFF_ROLES), asyncHandle
 }));
 
 // Optional app-level chat (LIV-10). Zoom's toolkit has its own chat, so you may delete these.
-sessionsRouter.get('/:id/messages', asyncHandler(async (req, res) => {
+sessionsRouter.get('/:id/messages', requireRole(ROLE.ADMIN, ROLE.OPERATOR, ROLE.TEACHER, ROLE.STUDENT), asyncHandler(async (req, res) => {
   const id = sessionIdFromReference(req.params.id);
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
@@ -471,7 +505,7 @@ sessionsRouter.get('/:id/messages', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
-sessionsRouter.post('/:id/messages', asyncHandler(async (req, res) => {
+sessionsRouter.post('/:id/messages', requireRole(ROLE.ADMIN, ROLE.OPERATOR, ROLE.TEACHER, ROLE.STUDENT), asyncHandler(async (req, res) => {
   const id = sessionIdFromReference(req.params.id);
   const message = String(req.body?.message || '').trim();
   if (!message) return fail(res, 400, 'Message cannot be empty');

@@ -109,6 +109,30 @@ export const initSchema = async () => {
   `;
 
   await sql`
+    CREATE TABLE IF NOT EXISTS grand_test_groups (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id),
+      title TEXT NOT NULL,
+      duration_min INTEGER NOT NULL,
+      mark_per_q NUMERIC NOT NULL DEFAULT 1,
+      neg_mark NUMERIC NOT NULL DEFAULT 0,
+      shuffle_q BOOLEAN NOT NULL DEFAULT TRUE,
+      shuffle_opt BOOLEAN NOT NULL DEFAULT TRUE,
+      start_at TIMESTAMPTZ NOT NULL,
+      end_at TIMESTAMPTZ NOT NULL,
+      result_mode INTEGER NOT NULL DEFAULT 1,
+      status INTEGER NOT NULL DEFAULT 1,
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    ALTER TABLE tests
+    ADD COLUMN IF NOT EXISTS test_type TEXT NOT NULL DEFAULT 'quiz',
+    ADD COLUMN IF NOT EXISTS grand_test_id INTEGER REFERENCES grand_test_groups(id) ON DELETE CASCADE
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS test_questions (
       test_id INTEGER NOT NULL REFERENCES tests(id),
       question_id INTEGER NOT NULL REFERENCES questions(id),
@@ -185,6 +209,11 @@ export const initSchema = async () => {
     ALTER TABLE live_sessions
     ADD COLUMN IF NOT EXISTS recurring_schedule_id INTEGER REFERENCES recurring_live_schedules(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS recurrence_key TEXT
+  `;
+  await sql`
+    ALTER TABLE live_sessions
+    ADD COLUMN IF NOT EXISTS video_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
   `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_live_sessions_recurring_occurrence ON live_sessions (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL`;
 

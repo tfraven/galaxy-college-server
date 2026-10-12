@@ -11,11 +11,11 @@ staffRouter.use(requireRole(ROLE.ADMIN));
 
 staffRouter.get('/', asyncHandler(async (req, res) => {
   const pagination = getPagination(req.query);
-  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM users WHERE role IN (2, 3)`;
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM users WHERE role IN (2, 3, 5)`;
   const data = await sql`
     SELECT id, role, username, full_name AS "fullName", phone,
            is_active AS "isActive", must_change_pw AS "mustChangePw"
-    FROM users WHERE role IN (2, 3) ORDER BY id ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
+    FROM users WHERE role IN (2, 3, 5) ORDER BY id ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
   res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
@@ -25,7 +25,7 @@ staffRouter.post('/', asyncHandler(async (req, res) => {
   if (!username?.trim() || !fullName?.trim()) return fail(res, 400, 'Full name and username are required');
 
   const finalRole = role === undefined ? ROLE.TEACHER : toInt(role);
-  if (![ROLE.OPERATOR, ROLE.TEACHER].includes(finalRole)) return fail(res, 400, 'Role must be Operator (2) or Teacher (3)');
+  if (![ROLE.OPERATOR, ROLE.TEACHER, ROLE.VIDEO_PARTICIPANT].includes(finalRole)) return fail(res, 400, 'Role must be Operator, Teacher or Video Session Participant');
 
   const existing = await sql`SELECT 1 FROM users WHERE LOWER(username) = LOWER(${username.trim()})`;
   if (existing.length) return fail(res, 400, 'Username already in use');

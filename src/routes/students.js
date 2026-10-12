@@ -79,16 +79,26 @@ studentsRouter.post('/preview-bulk', requireRole(ROLE.ADMIN), asyncHandler(async
   }
 
   const taken = new Set((await sql`SELECT LOWER(username) AS u FROM users`).map((r) => r.u));
-  const classIds = new Set((await sql`SELECT id FROM classes WHERE is_active = TRUE`).map((r) => r.id));
+  const classes = await sql`SELECT id, name FROM classes WHERE is_active = TRUE`;
+  const classIds = new Set(classes.map((row) => row.id));
+  const classIdsByName = new Map(classes.map((row) => [row.name.trim().toLowerCase(), row.id]));
+  const sections = await sql`SELECT id, class_id, name FROM sections`;
+  const sectionById = new Map(sections.map((row) => [row.id, row.class_id]));
 
   let n = parseInt(startNumber, 10) || 1001;
   const pad = parseInt(padding, 10) || 4;
 
   const previewRows = sampleRows.map((r, idx) => {
     let error;
-    if (!r.fullName?.trim()) error = 'Full name missing';
-    else if (!classIds.has(Number(r.classId))) error = 'Unknown class';
+    const fullName = typeof r.fullName === 'string' ? r.fullName.trim() : '';
+    const password = typeof r.password === 'string' ? r.password : '';
+    const classId = classIds.has(Number(r.classId)) ? Number(r.classId) : classIdsByName.get(String(r.classId || '').trim().toLowerCase());
+    const sectionId = r.sectionId ? Number(r.sectionId) : null;
+    if (!fullName) error = 'Full name missing';
+    else if (!password || Buffer.byteLength(password, 'utf8') < 8 || Buffer.byteLength(password, 'utf8') > 72) error = 'Password must be 8–72 bytes';
+    else if (!classId) error = 'Unknown class';
     else if (r.phone && !/^[0-9+\-\s]{7,20}$/.test(String(r.phone))) error = 'Bad phone number';
+    else if (sectionId && (!sectionById.has(sectionId) || sectionById.get(sectionId) !== classId)) error = 'Section does not belong to the class';
 
     let roll;
     do {
@@ -96,7 +106,9 @@ studentsRouter.post('/preview-bulk', requireRole(ROLE.ADMIN), asyncHandler(async
     } while (taken.has(roll.toLowerCase()));
     taken.add(roll.toLowerCase());
 
-    return { rowNum: idx + 1, fullName: r.fullName, generatedRollNo: roll, classId: r.classId, sectionId: r.sectionId, phone: r.phone, valid: !error, error };
+    return { rowNum: idx + 1, fullName, password, generatedRollNo: roll, rollNo: roll, classId, sectionId, phone: r.phone || '',
+      className: classes.find((item) => item.id === classId)?.name || '',
+      sectionName: sections.find((item) => item.id === sectionId)?.name || '', valid: !error, isValid: !error, error };
   });
 
   res.json({ success: true, data: { previewRows, totalValid: previewRows.filter((r) => r.valid).length } });
@@ -107,14 +119,15 @@ studentsRouter.post('/commit-bulk', requireRole(ROLE.ADMIN), asyncHandler(async 
   const rows = Array.isArray(req.body?.validRows) ? req.body.validRows : [];
   if (!rows.length) return fail(res, 400, 'No valid rows provided');
   if (rows.length > MAX_BULK_ROWS) return fail(res, 400, `Import limit is ${MAX_BULK_ROWS} rows per file`);
-  if (rows.some((r) => !r.fullName?.trim() || !r.generatedRollNo || !r.classId)) {
-    return fail(res, 400, 'Every row needs fullName, generatedRollNo and classId');
+  if (rows.some((r) => !r.fullName?.trim() || !r.generatedRollNo || !r.classId
+    || typeof r.password !== 'string' || Buffer.byteLength(r.password, 'utf8') < 8 || Buffer.byteLength(r.password, 'utf8') > 72)) {
+    return fail(res, 400, 'Every row needs a name, generated roll number, class and a password between 8 and 72 bytes.');
   }
 
   const credentials = [];
   const hashes = [];
   for (const r of rows) {
-    const tempPass = generateTempPassword();
+    const tempPass = r.password;
     credentials.push({ rollNo: r.generatedRollNo, tempPass });
     hashes.push(await bcrypt.hash(tempPass, BULK_BCRYPT_COST));
   }

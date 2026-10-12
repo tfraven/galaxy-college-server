@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { sql } from '../db/connection.js';
 import { config } from '../config/index.js';
 
-export const ROLE = { ADMIN: 1, OPERATOR: 2, TEACHER: 3, STUDENT: 4 };
+export const ROLE = { ADMIN: 1, OPERATOR: 2, TEACHER: 3, STUDENT: 4, VIDEO_PARTICIPANT: 5 };
 export const STAFF_ROLES = [ROLE.ADMIN, ROLE.OPERATOR, ROLE.TEACHER];
 
 const loadUser = async (id) => {

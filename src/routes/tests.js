@@ -24,6 +24,8 @@ const toDto = (t) => ({
   resultMode: t.result_mode,
   resultsReleased: t.results_released,
   status: t.status,
+  testType: t.test_type || 'quiz',
+  grandTestId: t.grand_test_id || null,
   questionIds: (t.question_ids || []).map(Number),
   createdBy: t.created_by,
   createdAt: t.created_at,
@@ -47,8 +49,8 @@ const publishedExamNotification = (row) => {
 };
 
 // One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
-const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null, courseId = null, searchPattern = null, pagination = null } = {}) => sql`
-  SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark,
+const fetchTests = ({ testId = null, grandTestId = null, teacherId = null, classId = null, sectionId = null, courseId = null, searchPattern = null, pagination = null } = {}) => sql`
+  SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark, t.test_type, t.grand_test_id,
          t.shuffle_q, t.shuffle_opt, t.start_at, t.end_at, t.result_mode, t.results_released, t.status,
          t.created_by, t.created_at,
          s.name AS subjectname, cl.name AS classname, sec.name AS sectionname,
@@ -59,6 +61,7 @@ const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId
   JOIN classes cl ON c.class_id = cl.id
   LEFT JOIN sections sec ON t.section_id = sec.id
   WHERE (${testId}::int IS NULL OR t.id = ${testId}::int)
+    AND (${grandTestId}::int IS NULL OR t.grand_test_id = ${grandTestId}::int)
     AND (${teacherId}::int IS NULL OR EXISTS (
           SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
     AND (${classId}::int IS NULL OR (
@@ -67,7 +70,7 @@ const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId
     AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
     AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
   ORDER BY t.id DESC
-  LIMIT ${pagination?.pageSize ?? 1} OFFSET ${pagination?.offset ?? 0}
+  LIMIT ${pagination?.pageSize ?? 1000} OFFSET ${pagination?.offset ?? 0}
 `;
 
 // EXM-1 / TST-6: students see only Published tests of their own class/section; staff see their scope.
@@ -108,6 +111,81 @@ testsRouter.get('/', asyncHandler(async (req, res) => {
   res.json({ success: true, data: rows.map(toDto), pagination: paginationMeta(total, pagination) });
 }));
 
+// A Grand Test is one scheduled assessment made up of one independently graded test per class subject.
+testsRouter.post('/grand', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const classId = toInt(req.body?.classId);
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  const durationMin = Number(req.body?.durationMin ?? 30);
+  const markPerQ = Number(req.body?.markPerQ ?? 1);
+  const negMark = Number(req.body?.negMark ?? 0);
+  const resultMode = toInt(req.body?.resultMode ?? 1);
+  const status = toInt(req.body?.status ?? 1);
+  const shuffleQ = req.body?.shuffleQ !== false;
+  const shuffleOpt = req.body?.shuffleOpt !== false;
+  const start = new Date(req.body?.startAt || Date.now());
+  const end = new Date(req.body?.endAt || Date.now() + 7 * 864e5);
+  if (!classId || !title || title.length > 180) return fail(res, 400, 'Choose a class and enter a Grand Test title.');
+  if (!Number.isInteger(durationMin) || durationMin < 1 || !Number.isFinite(markPerQ) || markPerQ <= 0 || !Number.isFinite(negMark) || negMark < 0) {
+    return fail(res, 400, 'Enter a valid duration and grading scheme.');
+  }
+  if (![1, 2, 3].includes(resultMode) || ![1, 2].includes(status) || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    return fail(res, 400, 'Choose a valid schedule, result mode, and status.');
+  }
+  const subjects = await sql`
+    SELECT c.id AS course_id, s.name AS subject_name, COUNT(q.id)::int AS question_count
+    FROM courses c JOIN subjects s ON s.id = c.subject_id
+    LEFT JOIN questions q ON q.course_id = c.id AND q.is_active = TRUE
+    WHERE c.class_id = ${classId}
+    GROUP BY c.id, s.name ORDER BY s.name
+  `;
+  if (!subjects.length) return fail(res, 400, 'This class has no subjects. Add its courses before creating a Grand Test.');
+  const emptySubjects = subjects.filter((subject) => subject.question_count < 1).map((subject) => subject.subject_name);
+  if (emptySubjects.length) return fail(res, 400, `Add active questions to every subject first. Missing: ${emptySubjects.join(', ')}.`);
+
+  const [{ id: grandTestId }] = await sql`
+    WITH g AS (
+      INSERT INTO grand_test_groups (class_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
+                                     start_at, end_at, result_mode, status, created_by)
+      VALUES (${classId}, ${title}, ${durationMin}, ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
+              ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${status}, ${req.user.id})
+      RETURNING id
+    ), subject_tests AS (
+      INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
+                         start_at, end_at, result_mode, results_released, status, created_by, test_type, grand_test_id)
+      SELECT c.id, NULL, ${title} || ' — ' || s.name, ${durationMin}, ${markPerQ}, ${negMark}, ${shuffleQ}, ${shuffleOpt},
+             ${start.toISOString()}, ${end.toISOString()}, ${resultMode}, ${resultMode !== 3}, ${status}, ${req.user.id},
+             'grand_test', g.id
+      FROM g CROSS JOIN courses c JOIN subjects s ON s.id = c.subject_id
+      WHERE c.class_id = ${classId}
+      RETURNING id, course_id
+    ), linked_questions AS (
+      INSERT INTO test_questions (test_id, question_id)
+      SELECT st.id, q.id FROM subject_tests st JOIN questions q ON q.course_id = st.course_id AND q.is_active = TRUE
+      RETURNING test_id
+    )
+    SELECT id FROM g
+  `;
+  const created = await fetchTests({ grandTestId });
+  if (status === 2) {
+    for (const row of created) {
+      const [course] = await sql`SELECT class_id FROM courses WHERE id = ${row.course_id}`;
+      await notifyStudents({ ...publishedExamNotification(row), relatedType: 'test', relatedId: row.id,
+        eventKey: `exam_published:${row.id}`, classId: course.class_id });
+    }
+  }
+  res.status(201).json({ success: true, data: { id: grandTestId, title, classId, subjectCount: subjects.length, tests: created.map(toDto) } });
+}));
+
+testsRouter.get('/grand/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const [group] = await sql`SELECT g.*, c.name AS class_name FROM grand_test_groups g JOIN classes c ON c.id = g.class_id WHERE g.id = ${id}`;
+  if (!group) return fail(res, 404, 'Grand Test not found.');
+  const rows = await fetchTests({ grandTestId: group.id });
+  res.json({ success: true, data: { id: group.id, title: group.title, classId: group.class_id,
+    className: group.class_name, startAt: group.start_at, endAt: group.end_at,
+    status: group.status, subjects: rows.map(toDto) } });
+}));
+
 // Includes correct answers, so staff only.
 testsRouter.get('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
@@ -127,7 +205,7 @@ testsRouter.get('/:id', requireRole(...STAFF_ROLES), asyncHandler(async (req, re
 
 testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
   const {
-    courseId, sectionId, title, durationMin = 15, markPerQ = 1, negMark = 0,
+    courseId, sectionId, title, testType = 'quiz', durationMin = 15, markPerQ = 1, negMark = 0,
     shuffleQ = true, shuffleOpt = true, startAt, endAt, resultMode = 1, status = 1,
   } = req.body || {};
   const questionIds = Array.isArray(req.body?.questionIds) ? [...new Set(req.body.questionIds.map(toInt))].filter((n) => n !== null) : [];
@@ -135,6 +213,7 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
   if (!courseId || !title?.trim() || !questionIds.length) {
     return fail(res, 400, 'Course, title, and at least 1 question are required');
   }
+  if (!['quiz', 'class_test'].includes(testType)) return fail(res, 400, 'Choose Quiz or Class Test. Grand Tests must use the Grand Test scheduler.');
   if (!(durationMin > 0) || !(markPerQ > 0) || negMark < 0) return fail(res, 400, 'Invalid duration or marks');
   if (![1, 2, 3].includes(resultMode) || ![1, 2, 3].includes(status)) return fail(res, 400, 'Invalid result mode or status');
   if (!(await canManageCourse(req.user, courseId))) return fail(res, 403, 'You are not assigned to this course.');
@@ -160,10 +239,10 @@ testsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, res)
   const [{ id }] = await sql`
     WITH t AS (
       INSERT INTO tests (course_id, section_id, title, duration_min, mark_per_q, neg_mark, shuffle_q, shuffle_opt,
-                         start_at, end_at, result_mode, results_released, status, created_by)
+                         start_at, end_at, result_mode, results_released, status, created_by, test_type)
       VALUES (${courseId}, ${sectionId || null}, ${title.trim()}, ${durationMin}, ${markPerQ}, ${negMark},
               ${shuffleQ}, ${shuffleOpt}, ${start.toISOString()}, ${end.toISOString()}, ${resultMode},
-              ${resultMode !== 3}, ${status}, ${req.user.id})
+              ${resultMode !== 3}, ${status}, ${req.user.id}, ${testType})
       RETURNING id
     ), tq AS (
       INSERT INTO test_questions (test_id, question_id)
