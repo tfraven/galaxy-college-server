@@ -330,6 +330,17 @@ sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), 
 sessionsRouter.get('/hosts', requireRole(...STAFF_ROLES), asyncHandler(async (req, res) => {
   const classId = req.query.classId === undefined ? null : toInt(req.query.classId);
   if (req.query.classId !== undefined && !classId) return fail(res, 400, 'Invalid class id.');
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`
+    SELECT COUNT(*)::int AS total FROM (
+      SELECT DISTINCT u.id FROM users u
+      WHERE u.role = ${ROLE.TEACHER} AND u.is_active = TRUE
+        AND (${classId}::int IS NULL OR EXISTS (
+          SELECT 1 FROM teacher_courses tc JOIN courses c ON c.id = tc.course_id
+          WHERE tc.user_id = u.id AND c.class_id = ${classId}::int
+        ))
+    ) hosts
+  `;
   const data = await sql`
     SELECT DISTINCT u.id, u.full_name AS "fullName"
     FROM users u
@@ -338,9 +349,9 @@ sessionsRouter.get('/hosts', requireRole(...STAFF_ROLES), asyncHandler(async (re
         SELECT 1 FROM teacher_courses tc JOIN courses c ON c.id = tc.course_id
         WHERE tc.user_id = u.id AND c.class_id = ${classId}::int
       ))
-    ORDER BY u.full_name ASC
+    ORDER BY u.full_name ASC, u.id ASC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
   `;
-  res.json({ success: true, data });
+  res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
 sessionsRouter.get('/:id', asyncHandler(async (req, res) => {

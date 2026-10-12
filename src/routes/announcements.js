@@ -55,7 +55,16 @@ announcementsRouter.post('/', requireRole(ROLE.ADMIN, ROLE.TEACHER), asyncHandle
 announcementsRouter.delete('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, 'Invalid announcement id.');
-  const [deleted] = await sql`DELETE FROM announcements WHERE id = ${id} RETURNING id`;
+  const [deleted] = await sql`
+    WITH deleted AS (
+      DELETE FROM announcements WHERE id = ${id} RETURNING id
+    ), cleared_notifications AS (
+      DELETE FROM notifications n USING deleted d
+      WHERE n.related_type = 'announcement' AND n.related_id = d.id
+      RETURNING n.id
+    )
+    SELECT id FROM deleted
+  `;
   if (!deleted) return fail(res, 404, 'Announcement not found.');
   return res.json({ success: true, data: { id: deleted.id, deleted: true } });
 }));
