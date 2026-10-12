@@ -47,7 +47,7 @@ const publishedExamNotification = (row) => {
 };
 
 // One query (question ids via array_agg) instead of 1 + N queries. Filters are optional NULL-able params.
-const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null, pagination = null } = {}) => sql`
+const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId = null, courseId = null, searchPattern = null, pagination = null } = {}) => sql`
   SELECT t.id, t.course_id, t.section_id, t.title, t.duration_min, t.mark_per_q, t.neg_mark,
          t.shuffle_q, t.shuffle_opt, t.start_at, t.end_at, t.result_mode, t.results_released, t.status,
          t.created_by, t.created_at,
@@ -64,6 +64,8 @@ const fetchTests = ({ testId = null, teacherId = null, classId = null, sectionId
     AND (${classId}::int IS NULL OR (
           t.status = 2 AND c.class_id = ${classId}::int
           AND (t.section_id IS NULL OR t.section_id = ${sectionId}::int)))
+    AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
+    AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
   ORDER BY t.id DESC
   ${pagination ? sql`LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}` : sql``}
 `;
@@ -86,13 +88,22 @@ testsRouter.get('/', asyncHandler(async (req, res) => {
     } else rows = [];
   } else {
     const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
+    const courseId = toInt(req.query.courseId);
+    const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+    const searchPattern = search ? `%${search}%` : null;
     const [{ count }] = await sql`
       SELECT COUNT(*)::int AS count FROM tests t
+      JOIN courses c ON c.id = t.course_id
+      JOIN subjects s ON s.id = c.subject_id
+      JOIN classes cl ON cl.id = c.class_id
+      LEFT JOIN sections sec ON sec.id = t.section_id
       WHERE (${teacherId}::int IS NULL OR EXISTS (
         SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
+        AND (${courseId}::int IS NULL OR t.course_id = ${courseId}::int)
+        AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', t.title, s.name, cl.name, sec.name) ILIKE ${searchPattern}::text)
     `;
     total = count;
-    rows = await fetchTests({ teacherId, pagination });
+    rows = await fetchTests({ teacherId, courseId, searchPattern, pagination });
   }
   res.json({ success: true, data: rows.map(toDto), pagination: paginationMeta(total, pagination) });
 }));

@@ -11,6 +11,8 @@ catalogRouter.use(requireRole(...STAFF_ROLES));
 
 catalogRouter.get('/questions', asyncHandler(async (req, res) => {
   const courseId = toInt(req.query.courseId);
+  const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const searchPattern = search ? `%${search}%` : null;
   const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
   const pagination = getPagination(req.query);
 
@@ -18,6 +20,7 @@ catalogRouter.get('/questions', asyncHandler(async (req, res) => {
     SELECT COUNT(*)::int AS total FROM questions q
     WHERE q.is_active = TRUE
       AND (${courseId}::int IS NULL OR q.course_id = ${courseId}::int)
+      AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', q.topic, q.body, q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.explanation) ILIKE ${searchPattern}::text)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = q.course_id))
   `;
@@ -30,6 +33,7 @@ catalogRouter.get('/questions', asyncHandler(async (req, res) => {
     FROM questions q
     WHERE q.is_active = TRUE
       AND (${courseId}::int IS NULL OR q.course_id = ${courseId}::int)
+      AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', q.topic, q.body, q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.explanation) ILIKE ${searchPattern}::text)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = q.course_id))
     ORDER BY q.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
