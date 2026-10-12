@@ -201,7 +201,8 @@ examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
     data: {
       attempt: describeAttempt(attempt, test, questions.length),
       test: {
-        id: test.id, title: test.title, courseName: `${test.subjectName} (${test.className})`,
+        id: test.id, title: test.title,
+        courseName: test.grand_test_id ? `Grand Test (${test.className})` : `${test.subjectName} (${test.className})`,
         durationMin: test.duration_min, markPerQ: parseFloat(test.mark_per_q), questionIds: questions.map((q) => q.id),
       },
       reviewQuestions,
@@ -218,7 +219,6 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
   const [{ total }] = await sql`
     SELECT COUNT(*)::int AS total FROM attempts a JOIN tests t ON a.test_id = t.id
     WHERE a.student_id = ${studentId}
-      AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
   `;
@@ -228,7 +228,6 @@ examRouter.get('/student-attempts/:studentId', asyncHandler(async (req, res) => 
            (SELECT COUNT(*)::int FROM test_questions WHERE test_id = t.id) AS question_count
     FROM attempts a JOIN tests t ON a.test_id = t.id
     WHERE a.student_id = ${studentId}
-      AND (t.grand_test_id IS NULL OR t.grand_test_order = 0)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = t.course_id))
     ORDER BY a.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}

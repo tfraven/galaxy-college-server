@@ -414,7 +414,7 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     }
     const overallMaxMarks = questions.length * Number(group.mark_per_q);
     const rawOverallScore = totalCorrect * Number(group.mark_per_q) - totalWrong * Number(group.neg_mark);
-    const overallScore = attempt?.submitted_at ? Math.max(0, Math.round(rawOverallScore * 100) / 100) : null;
+    const overallScore = submittedAt ? Math.max(0, Math.round(rawOverallScore * 100) / 100) : null;
     return {
       studentId: student.id, rollNo: student.roll_no, fullName: student.full_name,
       attempted: Boolean(masterAttempt || subjectAttempts.size), submittedAt,
