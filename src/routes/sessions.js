@@ -39,6 +39,65 @@ const toStudentDto = (s) => ({
   endedAt: s.ended_at,
 });
 
+const toRecurringDto = (s) => ({
+  id: s.id, classId: s.class_id, className: s.classname, sectionId: s.section_id,
+  sectionName: s.sectionname || 'All Sections', courseName: s.course_name,
+  title: s.title, hostId: s.host_id, hostName: s.hostname || 'Faculty Instructor',
+  timezone: s.timezone, weeklySlots: s.weekly_slots, enabled: s.enabled,
+});
+
+const normalizeWeeklySlots = (slots) => {
+  if (!Array.isArray(slots) || slots.length < 1 || slots.length > 21) return null;
+  const normalized = [];
+  const seen = new Set();
+  for (const item of slots) {
+    const weekday = Number(item?.weekday);
+    const startTime = String(item?.startTime || '');
+    const endTime = String(item?.endTime || '');
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6
+      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)
+      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime)
+      || endTime <= startTime) return null;
+    const key = `${weekday}:${startTime}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    normalized.push({ weekday, startTime, endTime });
+  }
+  return normalized;
+};
+
+const validateRecurringPayload = async (req, res, payload) => {
+  const classId = toInt(payload?.classId);
+  const sectionId = payload?.sectionId ? toInt(payload.sectionId) : null;
+  const title = typeof payload?.title === 'string' ? payload.title.trim() : '';
+  const courseName = typeof payload?.courseName === 'string' ? payload.courseName.trim() : 'General';
+  const hostId = payload?.hostId ? toInt(payload.hostId) : null;
+  const timezone = typeof payload?.timezone === 'string' ? payload.timezone.trim() : 'Asia/Karachi';
+  const weeklySlots = normalizeWeeklySlots(payload?.weeklySlots);
+  if (!classId || !title || title.length > 180 || courseName.length > 120 || !weeklySlots) {
+    fail(res, 400, 'Class, title, and valid weekly day/time slots are required.');
+    return null;
+  }
+  try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); }
+  catch { fail(res, 400, 'Choose a valid time zone.'); return null; }
+  if (!(await canManageClass(req.user, classId))) {
+    fail(res, 403, 'You are not assigned to this class.');
+    return null;
+  }
+  if (sectionId) {
+    const [section] = await sql`SELECT 1 FROM sections WHERE id = ${sectionId} AND class_id = ${classId}`;
+    if (!section) { fail(res, 400, 'Section does not belong to that class.'); return null; }
+  }
+  if (hostId) {
+    const [host] = await sql`SELECT id FROM users WHERE id = ${hostId} AND role = ${ROLE.TEACHER} AND is_active = TRUE`;
+    if (!host || !(await canManageClass({ role: ROLE.TEACHER, id: hostId }, classId))) {
+      fail(res, 400, 'Choose an active teacher assigned to this class.');
+      return null;
+    }
+  }
+  return { classId, sectionId, title, courseName: courseName || 'General', hostId, timezone, weeklySlots };
+};
+
 const fetchSessions = ({ id = null, classId = null, sectionId = null, teacherId = null, pagination = null } = {}) => sql`
   SELECT s.id, s.class_id, s.section_id, s.course_name, s.title, s.host_id, s.plan_start, s.plan_end,
          s.status, s.started_at, s.ended_at, s.created_by,
@@ -145,6 +204,78 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
     classId: row.class_id, sectionId: row.section_id,
   });
   res.status(201).json({ success: true, data: toDto(row) });
+}));
+
+sessionsRouter.get('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const pagination = getPagination(req.query);
+  const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM recurring_live_schedules`;
+  const rows = await sql`
+    SELECT r.id, r.class_id, r.section_id, r.course_name, r.title, r.host_id,
+           r.timezone, r.weekly_slots, r.enabled, c.name AS classname,
+           sec.name AS sectionname, u.full_name AS hostname
+    FROM recurring_live_schedules r
+    JOIN classes c ON c.id = r.class_id
+    LEFT JOIN sections sec ON sec.id = r.section_id
+    LEFT JOIN users u ON u.id = r.host_id
+    ORDER BY r.enabled DESC, r.id DESC LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
+  `;
+  res.json({ success: true, data: rows.map(toRecurringDto), pagination: paginationMeta(total, pagination) });
+}));
+
+sessionsRouter.post('/recurring', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const values = await validateRecurringPayload(req, res, req.body || {});
+  if (!values) return;
+  const [row] = await sql`
+    INSERT INTO recurring_live_schedules (class_id, section_id, course_name, title, host_id, timezone, weekly_slots, created_by)
+    VALUES (${values.classId}, ${values.sectionId}, ${values.courseName}, ${values.title}, ${values.hostId},
+            ${values.timezone}, ${JSON.stringify(values.weeklySlots)}::jsonb, ${req.user.id})
+    RETURNING id, class_id, section_id, course_name, title, host_id, timezone, weekly_slots, enabled
+  `;
+  const [details] = await sql`
+    SELECT r.*, c.name AS classname, sec.name AS sectionname, u.full_name AS hostname
+    FROM recurring_live_schedules r JOIN classes c ON c.id = r.class_id
+    LEFT JOIN sections sec ON sec.id = r.section_id LEFT JOIN users u ON u.id = r.host_id
+    WHERE r.id = ${row.id}
+  `;
+  res.status(201).json({ success: true, data: toRecurringDto(details) });
+}));
+
+sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id) return fail(res, 400, 'Invalid recurring schedule id.');
+  const [existing] = await sql`SELECT id FROM recurring_live_schedules WHERE id = ${id}`;
+  if (!existing) return fail(res, 404, 'Recurring schedule not found.');
+  const values = await validateRecurringPayload(req, res, req.body || {});
+  if (!values) return;
+  const [row] = await sql`
+    UPDATE recurring_live_schedules
+    SET class_id = ${values.classId}, section_id = ${values.sectionId}, course_name = ${values.courseName},
+        title = ${values.title}, host_id = ${values.hostId}, timezone = ${values.timezone},
+        weekly_slots = ${JSON.stringify(values.weeklySlots)}::jsonb, updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING id
+  `;
+  await sql`
+    DELETE FROM notifications WHERE related_type = 'live_session' AND related_id IN (
+      SELECT id FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()
+    )
+  `;
+  await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
+  const [details] = await sql`
+    SELECT r.*, c.name AS classname, sec.name AS sectionname, u.full_name AS hostname
+    FROM recurring_live_schedules r JOIN classes c ON c.id = r.class_id
+    LEFT JOIN sections sec ON sec.id = r.section_id LEFT JOIN users u ON u.id = r.host_id
+    WHERE r.id = ${row.id}
+  `;
+  res.json({ success: true, data: toRecurringDto(details) });
+}));
+
+sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id || typeof req.body?.enabled !== 'boolean') return fail(res, 400, 'A schedule id and enabled flag are required.');
+  const [row] = await sql`UPDATE recurring_live_schedules SET enabled = ${req.body.enabled}, updated_at = NOW() WHERE id = ${id} RETURNING id, enabled`;
+  if (!row) return fail(res, 404, 'Recurring schedule not found.');
+  res.json({ success: true, data: row });
 }));
 
 const NEXT = { 1: [2, 3], 2: [3] }; // Scheduled -> Live | Ended ; Live -> Ended (LIV-3)
