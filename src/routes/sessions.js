@@ -273,7 +273,8 @@ sessionsRouter.get('/', asyncHandler(async (req, res) => {
     total = count;
     rows = await fetchSessions({ teacherId, pagination });
   }
-  res.json({ success: true, data: rows.map(req.user.role === ROLE.STUDENT ? toStudentDto : toDto), pagination: paginationMeta(total, pagination) });
+  const publicViewer = req.user.role === ROLE.STUDENT || req.user.role === ROLE.VIDEO_PARTICIPANT;
+  res.json({ success: true, data: rows.map(publicViewer ? toStudentDto : toDto), pagination: paginationMeta(total, pagination) });
 }));
 
 // LIV-1: schedule. No Zoom link/ID needed: the room is derived from the session id.
@@ -281,6 +282,12 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
   const { classId, sectionId, courseName, title, hostId, planStart, planEnd, videoEnabled = true } = req.body || {};
   if (!classId || !title?.trim()) return fail(res, 400, 'Class and title are required');
   if (!(await canManageClass(req.user, classId))) return fail(res, 403, 'You are not assigned to this class.');
+  const videoParticipantIds = req.user.role === ROLE.ADMIN
+    ? normalizeParticipantIds(req.body?.videoParticipantIds)
+    : [];
+  if (videoEnabled && !(await validateVideoParticipants(videoParticipantIds))) {
+    return fail(res, 400, 'Only active video-session participant accounts can be allowed.');
+  }
 
   if (sectionId) {
     const [sec] = await sql`SELECT 1 FROM sections WHERE id = ${sectionId} AND class_id = ${classId}`;
@@ -317,6 +324,7 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
             ${zoomMeeting?.meetingId || null}, ${zoomMeeting?.passcode || null}, ${zoomMeeting?.joinUrl || null})
     RETURNING id
   `;
+  await setSessionVideoParticipants(id, videoEnabled ? videoParticipantIds : [], req.user.id);
   const [row] = await fetchSessions({ id });
   await notifyStudents({
     type: 'live_scheduled', title: `Live class scheduled: ${row.title}`,
@@ -507,7 +515,8 @@ sessionsRouter.get('/:id', asyncHandler(async (req, res) => {
   const access = await getAccess(req.user, id);
   if (access.error) return fail(res, ...access.error);
   const [row] = await fetchSessions({ id });
-  res.json({ success: true, data: req.user.role === ROLE.STUDENT ? toStudentDto(row) : toDto(row) });
+  const publicViewer = req.user.role === ROLE.STUDENT || req.user.role === ROLE.VIDEO_PARTICIPANT;
+  res.json({ success: true, data: publicViewer ? toStudentDto(row) : toDto(row) });
 }));
 
 sessionsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
