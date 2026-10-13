@@ -18,6 +18,8 @@ export const configuredZoomAccounts = () => Object.entries(config.zoom.accounts)
 export const zoomAccountConfigured = (key) => Boolean(getAccount(key));
 export const zoomConfigured = () => configuredZoomAccounts().length > 0;
 
+export const sessionReferenceFor = (id) => `s_${Buffer.from(String(id), 'utf8').toString('base64url')}`;
+
 export const sessionIdFromReference = (reference) => {
   if (typeof reference !== 'string') return null;
   if (/^[1-9]\d*$/.test(reference)) {

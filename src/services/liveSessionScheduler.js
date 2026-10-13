@@ -39,7 +39,7 @@ const weekdayFor = ({ year, month, day }) => new Date(Date.UTC(year, month - 1, 
 
 /**
  * Creates each occurrence once and advances scheduled/live rows from wall-clock times.
- * Called by both the hosted process timer and the authenticated platform cron endpoint.
+ * Called on session-list reads and by the optional authenticated platform cron endpoint.
  */
 export const runLiveSessionScheduler = async (now = new Date()) => {
   const schedules = await sql`
