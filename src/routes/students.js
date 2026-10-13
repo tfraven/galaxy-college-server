@@ -16,6 +16,7 @@ studentsRouter.get('/', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(asy
   const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM students`;
   const data = await sql`
     SELECT s.user_id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", u.phone,
+           s.father_name AS "fatherName", s.caste,
            s.class_id AS "classId", c.name AS "className",
            s.section_id AS "sectionId", sec.name AS "sectionName", u.is_active AS "isActive"
     FROM students s
@@ -28,7 +29,7 @@ studentsRouter.get('/', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(asy
 }));
 
 studentsRouter.post('/', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
-  const { fullName, rollNo, classId, sectionId, phone } = req.body || {};
+  const { fullName, rollNo, classId, sectionId, phone, fatherName, caste } = req.body || {};
   if (!fullName?.trim() || !rollNo?.trim() || !classId) {
     return fail(res, 400, 'Full name, roll number, and class are required');
   }
@@ -55,8 +56,8 @@ studentsRouter.post('/', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) 
       VALUES (4, ${rollNo.trim()}, ${hash}, ${fullName.trim()}, ${phone || null}, TRUE, FALSE)
       RETURNING id
     ), s AS (
-      INSERT INTO students (user_id, class_id, section_id)
-      SELECT id, ${classId}, ${sectionId || null} FROM u RETURNING user_id
+      INSERT INTO students (user_id, class_id, section_id, father_name, caste)
+      SELECT id, ${classId}, ${sectionId || null}, NULLIF(${String(fatherName || '').trim()}, ''), NULLIF(${String(caste || '').trim()}, '') FROM u RETURNING user_id
     )
     SELECT id FROM u
   `;
@@ -65,7 +66,7 @@ studentsRouter.post('/', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) 
     success: true,
     data: {
       user: { id: created.id, role: 4, username: rollNo.trim(), fullName: fullName.trim(), phone: phone || null, isActive: true, mustChangePw: false },
-      student: { userId: created.id, rollNo: rollNo.trim(), classId, className: cls.name, sectionId: sectionId || null, sectionName: sec?.name ?? null },
+      student: { userId: created.id, rollNo: rollNo.trim(), classId, className: cls.name, sectionId: sectionId || null, sectionName: sec?.name ?? null, fatherName: fatherName?.trim() || '', caste: caste?.trim() || '' },
       tempPassword, // shown once (STU-6)
     },
   });
@@ -92,6 +93,7 @@ studentsRouter.post('/preview-bulk', requireRole(ROLE.ADMIN), asyncHandler(async
     let error;
     const fullName = typeof r.fullName === 'string' ? r.fullName.trim() : '';
     const password = typeof r.password === 'string' ? r.password : '';
+    const suppliedRoll = String(r.rollNo || r.username || '').trim();
     const classId = classIds.has(Number(r.classId)) ? Number(r.classId) : classIdsByName.get(String(r.classId || '').trim().toLowerCase());
     const sectionId = r.sectionId ? Number(r.sectionId) : null;
     if (!fullName) error = 'Full name missing';
@@ -100,13 +102,18 @@ studentsRouter.post('/preview-bulk', requireRole(ROLE.ADMIN), asyncHandler(async
     else if (r.phone && !/^[0-9+\-\s]{7,20}$/.test(String(r.phone))) error = 'Bad phone number';
     else if (sectionId && (!sectionById.has(sectionId) || sectionById.get(sectionId) !== classId)) error = 'Section does not belong to the class';
 
-    let roll;
-    do {
-      roll = `${prefix}${String(n++).padStart(pad, '0')}`;
-    } while (taken.has(roll.toLowerCase()));
-    taken.add(roll.toLowerCase());
+    let roll = suppliedRoll;
+    if (roll) {
+      if (roll.length > 80 || /\s/.test(roll)) error ||= 'Roll number / username must be 1–80 characters with no spaces';
+      else if (taken.has(roll.toLowerCase())) error ||= `Roll number / username "${roll}" is already used`;
+      taken.add(roll.toLowerCase());
+    } else {
+      do { roll = `${prefix}${String(n++).padStart(pad, '0')}`; }
+      while (taken.has(roll.toLowerCase()));
+      taken.add(roll.toLowerCase());
+    }
 
-    return { rowNum: idx + 1, fullName, password, generatedRollNo: roll, rollNo: roll, classId, sectionId, phone: r.phone || '',
+    return { rowNum: idx + 1, fullName, password, generatedRollNo: roll, rollNo: roll, fatherName: r.fatherName || '', caste: r.caste || '', classId, sectionId, phone: r.phone || '',
       className: classes.find((item) => item.id === classId)?.name || '',
       sectionName: sections.find((item) => item.id === sectionId)?.name || '', valid: !error, isValid: !error, error };
   });
@@ -119,9 +126,9 @@ studentsRouter.post('/commit-bulk', requireRole(ROLE.ADMIN), asyncHandler(async 
   const rows = Array.isArray(req.body?.validRows) ? req.body.validRows : [];
   if (!rows.length) return fail(res, 400, 'No valid rows provided');
   if (rows.length > MAX_BULK_ROWS) return fail(res, 400, `Import limit is ${MAX_BULK_ROWS} rows per file`);
-  if (rows.some((r) => !r.fullName?.trim() || !r.generatedRollNo || !r.classId
+  if (rows.some((r) => !r.fullName?.trim() || !r.generatedRollNo?.trim() || !r.classId
     || typeof r.password !== 'string' || Buffer.byteLength(r.password, 'utf8') < 8 || Buffer.byteLength(r.password, 'utf8') > 72)) {
-    return fail(res, 400, 'Every row needs a name, generated roll number, class and a password between 8 and 72 bytes.');
+    return fail(res, 400, 'Every row needs a name, roll number or username, class and a password between 8 and 72 bytes.');
   }
 
   const credentials = [];
@@ -142,11 +149,12 @@ studentsRouter.post('/commit-bulk', requireRole(ROLE.ADMIN), asyncHandler(async 
              AS t(username, hash, full_name, phone)
         RETURNING id, username
       )
-      INSERT INTO students (user_id, class_id, section_id)
-      SELECT ins.id, t.class_id, t.section_id
+        INSERT INTO students (user_id, class_id, section_id, father_name, caste)
+        SELECT ins.id, t.class_id, t.section_id, NULLIF(t.father_name, ''), NULLIF(t.caste, '')
       FROM ins JOIN unnest(${rows.map((r) => r.generatedRollNo)}::text[], ${rows.map((r) => Number(r.classId))}::int[],
-                           ${rows.map((r) => (r.sectionId ? Number(r.sectionId) : null))}::int[])
-           AS t(username, class_id, section_id) ON t.username = ins.username
+                           ${rows.map((r) => (r.sectionId ? Number(r.sectionId) : null))}::int[],
+                           ${rows.map((r) => String(r.fatherName || '').trim())}::text[], ${rows.map((r) => String(r.caste || '').trim())}::text[])
+           AS t(username, class_id, section_id, father_name, caste) ON t.username = ins.username
     `;
   } catch (err) {
     if (err.code === '23505') return fail(res, 409, 'A roll number was taken in the meantime. Run the preview again.');
@@ -161,6 +169,7 @@ studentsRouter.get('/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
   if (id === null) return fail(res, 400, 'Invalid student id');
   const [student] = await sql`
     SELECT s.user_id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", u.phone,
+           s.father_name AS "fatherName", s.caste,
            s.class_id AS "classId", c.name AS "className",
            s.section_id AS "sectionId", sec.name AS "sectionName", u.is_active AS "isActive"
     FROM students s
@@ -175,11 +184,12 @@ studentsRouter.get('/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(
 
 studentsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
-  const { fullName, phone, classId, sectionId } = req.body || {};
+  const { fullName, phone, classId, sectionId, fatherName, caste } = req.body || {};
   if (id === null) return fail(res, 400, 'Invalid student id');
 
-  if (fullName !== undefined) {
-    await sql`UPDATE users SET full_name = ${fullName.trim()}, phone = ${phone || null} WHERE id = ${id}`;
+  if (fullName !== undefined || phone !== undefined) {
+    await sql`UPDATE users SET full_name = COALESCE(${fullName === undefined ? null : fullName.trim()}, full_name),
+                               phone = CASE WHEN ${phone !== undefined} THEN NULLIF(${phone || ''}, '') ELSE phone END WHERE id = ${id}`;
   }
   if (classId) {
     await sql`
@@ -189,9 +199,16 @@ studentsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res
       WHERE user_id = ${id}
     `;
   }
+  if (fatherName !== undefined || caste !== undefined) {
+    await sql`UPDATE students SET
+      father_name = CASE WHEN ${fatherName !== undefined} THEN NULLIF(${String(fatherName || '').trim()}, '') ELSE father_name END,
+      caste = CASE WHEN ${caste !== undefined} THEN NULLIF(${String(caste || '').trim()}, '') ELSE caste END
+      WHERE user_id = ${id}`;
+  }
 
   const [student] = await sql`
     SELECT s.user_id AS "userId", u.username AS "rollNo", u.full_name AS "fullName", u.phone,
+           s.father_name AS "fatherName", s.caste,
            s.class_id AS "classId", c.name AS "className",
            s.section_id AS "sectionId", sec.name AS "sectionName", u.is_active AS "isActive"
     FROM students s

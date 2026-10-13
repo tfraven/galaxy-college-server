@@ -48,13 +48,28 @@ export const config = {
   jwtIssuer: 'college-runner-api',
   jwtAudience: 'college-runner-mobile',
   databaseUrl: process.env.DATABASE_URL || '',
-  // Recurring live classes remain implemented, but are off until a scheduler is configured.
-  recurringLiveClassesEnabled: process.env.ENABLE_RECURRING_LIVE_CLASSES === 'true',
   // An empty list denies browser origins; native mobile requests do not use browser CORS.
   corsOrigins,
   zoom: {
-    // Must be the Video SDK SDK Key + SDK Secret, not OAuth Client ID/Secret, API keys, or Meeting SDK credentials.
-    sdkKey: process.env.ZOOM_SDK_KEY || '',
-    sdkSecret: process.env.ZOOM_SDK_SECRET || '',
+    accounts: {
+      account1: {
+        label: process.env.ZOOM_ACCOUNT_1_LABEL || 'Zoom account 1',
+        accountId: process.env.ZOOM_ACCOUNT_1_ACCOUNT_ID || '',
+        userId: process.env.ZOOM_ACCOUNT_1_USER_ID || '',
+        clientId: process.env.ZOOM_ACCOUNT_1_CLIENT_ID || '',
+        clientSecret: process.env.ZOOM_ACCOUNT_1_CLIENT_SECRET || '',
+        sdkKey: process.env.ZOOM_ACCOUNT_1_SDK_KEY || '',
+        sdkSecret: process.env.ZOOM_ACCOUNT_1_SDK_SECRET || '',
+      },
+      account2: {
+        label: process.env.ZOOM_ACCOUNT_2_LABEL || 'Zoom account 2',
+        accountId: process.env.ZOOM_ACCOUNT_2_ACCOUNT_ID || '',
+        userId: process.env.ZOOM_ACCOUNT_2_USER_ID || '',
+        clientId: process.env.ZOOM_ACCOUNT_2_CLIENT_ID || '',
+        clientSecret: process.env.ZOOM_ACCOUNT_2_CLIENT_SECRET || '',
+        sdkKey: process.env.ZOOM_ACCOUNT_2_SDK_KEY || '',
+        sdkSecret: process.env.ZOOM_ACCOUNT_2_SDK_SECRET || '',
+      },
+    },
   },
 };

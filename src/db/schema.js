@@ -66,14 +66,18 @@ export const initSchema = async () => {
     CREATE TABLE IF NOT EXISTS students (
       user_id INTEGER PRIMARY KEY REFERENCES users(id),
       class_id INTEGER NOT NULL REFERENCES classes(id),
-      section_id INTEGER REFERENCES sections(id)
+      section_id INTEGER REFERENCES sections(id),
+      father_name TEXT,
+      caste TEXT
     )
   `;
+  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS father_name TEXT, ADD COLUMN IF NOT EXISTS caste TEXT`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS questions (
       id SERIAL PRIMARY KEY,
       course_id INTEGER NOT NULL REFERENCES courses(id),
+      pool_name TEXT NOT NULL DEFAULT 'General',
       topic TEXT,
       body TEXT NOT NULL,
       image TEXT,
@@ -88,6 +92,7 @@ export const initSchema = async () => {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  await sql`ALTER TABLE questions ADD COLUMN IF NOT EXISTS pool_name TEXT NOT NULL DEFAULT 'General'`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS tests (
@@ -215,7 +220,8 @@ export const initSchema = async () => {
       zoom_session_pwd TEXT,
       zoom_meeting_id TEXT,
       zoom_passcode TEXT,
-      zoom_join_url TEXT
+      zoom_join_url TEXT,
+      zoom_account TEXT NOT NULL DEFAULT 'account1'
     )
   `;
 
@@ -229,6 +235,7 @@ export const initSchema = async () => {
       host_id INTEGER REFERENCES users(id),
       timezone TEXT NOT NULL DEFAULT 'Asia/Karachi',
       weekly_slots JSONB NOT NULL DEFAULT '[]'::jsonb,
+      zoom_account TEXT NOT NULL DEFAULT 'account1',
       enabled BOOLEAN NOT NULL DEFAULT TRUE,
       deleted_at TIMESTAMPTZ,
       created_by INTEGER REFERENCES users(id),
@@ -237,6 +244,7 @@ export const initSchema = async () => {
     )
   `;
   await sql`ALTER TABLE recurring_live_schedules ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE recurring_live_schedules ADD COLUMN IF NOT EXISTS zoom_account TEXT NOT NULL DEFAULT 'account1'`;
   await sql`
     ALTER TABLE live_sessions
     ADD COLUMN IF NOT EXISTS recurring_schedule_id INTEGER REFERENCES recurring_live_schedules(id) ON DELETE SET NULL,
@@ -245,9 +253,28 @@ export const initSchema = async () => {
   await sql`
     ALTER TABLE live_sessions
     ADD COLUMN IF NOT EXISTS video_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS zoom_account TEXT NOT NULL DEFAULT 'account1'
   `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_live_sessions_recurring_occurrence ON live_sessions (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS video_participant_sessions (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id INTEGER NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, session_id)
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_video_participant_sessions_session ON video_participant_sessions (session_id)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS recurring_video_participants (
+      schedule_id INTEGER NOT NULL REFERENCES recurring_live_schedules(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY (schedule_id, user_id)
+    )
+  `;
 
   await sql`
     ALTER TABLE users
@@ -293,7 +320,7 @@ export const initSchema = async () => {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_login_rate_limits_reset_at ON login_rate_limits (reset_at)`;
 
-  // Databases created before the Zoom Video SDK migration may lack these; harmless otherwise.
+  // Databases created before Zoom meeting credentials were added may lack these; harmless otherwise.
   await sql`
     ALTER TABLE live_sessions
     ADD COLUMN IF NOT EXISTS zoom_meeting_id TEXT,

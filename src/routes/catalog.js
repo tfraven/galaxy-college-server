@@ -11,6 +11,7 @@ catalogRouter.use(requireRole(...STAFF_ROLES));
 
 catalogRouter.get('/questions', asyncHandler(async (req, res) => {
   const courseId = toInt(req.query.courseId);
+  const poolName = typeof req.query.poolName === 'string' && req.query.poolName.trim() ? req.query.poolName.trim().slice(0, 120) : null;
   const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
   const searchPattern = search ? `%${search}%` : null;
   const teacherId = req.user.role === ROLE.TEACHER ? req.user.id : null;
@@ -20,19 +21,21 @@ catalogRouter.get('/questions', asyncHandler(async (req, res) => {
     SELECT COUNT(*)::int AS total FROM questions q
     WHERE q.is_active = TRUE
       AND (${courseId}::int IS NULL OR q.course_id = ${courseId}::int)
+      AND (${poolName}::text IS NULL OR q.pool_name = ${poolName}::text)
       AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', q.topic, q.body, q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.explanation) ILIKE ${searchPattern}::text)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = q.course_id))
   `;
 
   const data = await sql`
-    SELECT q.id, q.course_id AS "courseId", q.topic, q.body, q.image,
+    SELECT q.id, q.course_id AS "courseId", q.pool_name AS "poolName", q.topic, q.body, q.image,
            q.opt_a AS "optA", q.opt_b AS "optB", q.opt_c AS "optC", q.opt_d AS "optD",
            q.correct, q.explanation, q.is_active AS "isActive",
            q.created_by AS "createdBy", q.created_at AS "createdAt"
     FROM questions q
     WHERE q.is_active = TRUE
       AND (${courseId}::int IS NULL OR q.course_id = ${courseId}::int)
+      AND (${poolName}::text IS NULL OR q.pool_name = ${poolName}::text)
       AND (${searchPattern}::text IS NULL OR CONCAT_WS(' ', q.topic, q.body, q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.explanation) ILIKE ${searchPattern}::text)
       AND (${teacherId}::int IS NULL OR EXISTS (
             SELECT 1 FROM teacher_courses tc WHERE tc.user_id = ${teacherId}::int AND tc.course_id = q.course_id))
@@ -41,11 +44,23 @@ catalogRouter.get('/questions', asyncHandler(async (req, res) => {
   res.json({ success: true, data, pagination: paginationMeta(total, pagination) });
 }));
 
+catalogRouter.get('/questions/pools', asyncHandler(async (req, res) => {
+  const courseId = toInt(req.query.courseId);
+  if (!courseId) return fail(res, 400, 'courseId is required.');
+  if (!(await canManageCourse(req.user, courseId))) return fail(res, 403, 'You are not assigned to this course.');
+  const data = await sql`
+    SELECT pool_name AS "poolName", COUNT(*)::int AS "questionCount"
+    FROM questions WHERE course_id = ${courseId} AND is_active = TRUE
+    GROUP BY pool_name ORDER BY pool_name ASC
+  `;
+  res.json({ success: true, data });
+}));
+
 catalogRouter.get('/questions/:id', asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return fail(res, 400, 'Invalid question id.');
   const [question] = await sql`
-    SELECT q.id, q.course_id AS "courseId", q.topic, q.body, q.image,
+    SELECT q.id, q.course_id AS "courseId", q.pool_name AS "poolName", q.topic, q.body, q.image,
            q.opt_a AS "optA", q.opt_b AS "optB", q.opt_c AS "optC", q.opt_d AS "optD",
            q.correct, q.explanation, q.is_active AS "isActive",
            q.created_by AS "createdBy", q.created_at AS "createdAt"
@@ -57,7 +72,7 @@ catalogRouter.get('/questions/:id', asyncHandler(async (req, res) => {
 }));
 
 catalogRouter.post('/questions', asyncHandler(async (req, res) => {
-  const { courseId, topic, body, image, optA, optB, optC, optD, correct, explanation } = req.body || {};
+  const { courseId, poolName, topic, body, image, optA, optB, optC, optD, correct, explanation } = req.body || {};
   if (!courseId || !body?.trim() || !optA?.trim() || !optB?.trim() || !optC?.trim() || !optD?.trim() || !correct) {
     return fail(res, 400, 'All 4 options, question body, and correct answer are required');
   }
@@ -66,11 +81,11 @@ catalogRouter.post('/questions', asyncHandler(async (req, res) => {
   if (!(await canManageCourse(req.user, courseId))) return fail(res, 403, 'You are not assigned to this course.');
 
   const [q] = await sql`
-    INSERT INTO questions (course_id, topic, body, image, opt_a, opt_b, opt_c, opt_d, correct, explanation, created_by)
-    VALUES (${courseId}, ${topic || null}, ${body.trim()}, ${image || null},
+    INSERT INTO questions (course_id, pool_name, topic, body, image, opt_a, opt_b, opt_c, opt_d, correct, explanation, created_by)
+    VALUES (${courseId}, ${String(poolName || 'General').trim().slice(0, 120) || 'General'}, ${topic || null}, ${body.trim()}, ${image || null},
             ${optA.trim()}, ${optB.trim()}, ${optC.trim()}, ${optD.trim()},
             ${upper}, ${explanation || null}, ${req.user.id})
-    RETURNING id, course_id AS "courseId", topic, body, image,
+    RETURNING id, course_id AS "courseId", pool_name AS "poolName", topic, body, image,
               opt_a AS "optA", opt_b AS "optB", opt_c AS "optC", opt_d AS "optD",
               correct, explanation, is_active AS "isActive", created_by AS "createdBy", created_at AS "createdAt"
   `;
@@ -79,7 +94,7 @@ catalogRouter.post('/questions', asyncHandler(async (req, res) => {
 
 catalogRouter.put('/questions/:id', asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
-  const { topic, body, image, optA, optB, optC, optD, correct, explanation, courseId } = req.body || {};
+  const { poolName, topic, body, image, optA, optB, optC, optD, correct, explanation, courseId } = req.body || {};
   if (!body?.trim() || !optA?.trim() || !optB?.trim() || !optC?.trim() || !optD?.trim() || !correct) {
     return fail(res, 400, 'All 4 options, question body, and correct answer are required');
   }
@@ -92,7 +107,8 @@ catalogRouter.put('/questions/:id', asyncHandler(async (req, res) => {
 
   const [q] = await sql`
     UPDATE questions
-    SET topic = ${topic || null},
+    SET pool_name = ${String(poolName || 'General').trim().slice(0, 120) || 'General'},
+        topic = ${topic || null},
         body = ${body.trim()},
         image = ${image || null},
         opt_a = ${optA.trim()},
@@ -103,11 +119,22 @@ catalogRouter.put('/questions/:id', asyncHandler(async (req, res) => {
         explanation = ${explanation || null},
         course_id = ${courseId ? toInt(courseId) : existing.course_id}
     WHERE id = ${id}
-    RETURNING id, course_id AS "courseId", topic, body, image,
+    RETURNING id, course_id AS "courseId", pool_name AS "poolName", topic, body, image,
               opt_a AS "optA", opt_b AS "optB", opt_c AS "optC", opt_d AS "optD",
               correct, explanation, is_active AS "isActive", created_by AS "createdBy", created_at AS "createdAt"
   `;
   res.json({ success: true, data: q });
+}));
+
+catalogRouter.patch('/questions/:id/correct', asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const correct = String(req.body?.correct || '').toUpperCase();
+  if (!id || !['A', 'B', 'C', 'D'].includes(correct)) return fail(res, 400, 'A valid question id and correct option (A–D) are required.');
+  const [existing] = await sql`SELECT course_id FROM questions WHERE id = ${id} AND is_active = TRUE`;
+  if (!existing) return fail(res, 404, 'Question not found.');
+  if (!(await canManageCourse(req.user, existing.course_id))) return fail(res, 403, 'Not your course.');
+  const [question] = await sql`UPDATE questions SET correct = ${correct} WHERE id = ${id} RETURNING id, correct`;
+  res.json({ success: true, data: question });
 }));
 
 catalogRouter.delete('/questions/:id', asyncHandler(async (req, res) => {
@@ -129,16 +156,16 @@ catalogRouter.post('/questions/bulk', asyncHandler(async (req, res) => {
 
   const inserted = [];
   for (const item of questions) {
-    const { topic, body, image, optA, optB, optC, optD, correct, explanation } = item;
+    const { poolName, topic, body, image, optA, optB, optC, optD, correct, explanation } = item;
     if (body?.trim() && optA?.trim() && optB?.trim() && optC?.trim() && optD?.trim() && correct) {
       const upper = String(correct).toUpperCase();
       if (['A', 'B', 'C', 'D'].includes(upper)) {
         const [q] = await sql`
-          INSERT INTO questions (course_id, topic, body, image, opt_a, opt_b, opt_c, opt_d, correct, explanation, created_by)
-          VALUES (${courseId}, ${topic || null}, ${body.trim()}, ${image || null},
+          INSERT INTO questions (course_id, pool_name, topic, body, image, opt_a, opt_b, opt_c, opt_d, correct, explanation, created_by)
+          VALUES (${courseId}, ${String(poolName || 'General').trim().slice(0, 120) || 'General'}, ${topic || null}, ${body.trim()}, ${image || null},
                   ${optA.trim()}, ${optB.trim()}, ${optC.trim()}, ${optD.trim()},
                   ${upper}, ${explanation || null}, ${req.user.id})
-          RETURNING id, course_id AS "courseId", topic, body, image,
+          RETURNING id, course_id AS "courseId", pool_name AS "poolName", topic, body, image,
                     opt_a AS "optA", opt_b AS "optB", opt_c AS "optC", opt_d AS "optD",
                     correct, explanation, is_active AS "isActive", created_by AS "createdBy", created_at AS "createdAt"
         `;

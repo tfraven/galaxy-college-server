@@ -1,10 +1,22 @@
 import jwt from 'jsonwebtoken';
-import { createHmac } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { config } from '../config/index.js';
 
-// Student-facing references avoid exposing sequential database ids in the UI or API payloads.
-export const sessionReferenceFor = (sessionId) =>
-  `s_${Buffer.from(String(sessionId), 'utf8').toString('base64url')}`;
+const isPlaceholder = (value) => !value || /YOUR_ZOOM|CHANGE_ME/i.test(value);
+const tokenCache = new Map();
+
+const getAccount = (key) => {
+  const account = config.zoom.accounts[key];
+  if (!account || [account.accountId, account.userId, account.clientId, account.clientSecret, account.sdkKey, account.sdkSecret].some(isPlaceholder)) return null;
+  return account;
+};
+
+export const configuredZoomAccounts = () => Object.entries(config.zoom.accounts)
+  .filter(([key]) => getAccount(key))
+  .map(([id, account]) => ({ id, label: account.label }));
+
+export const zoomAccountConfigured = (key) => Boolean(getAccount(key));
+export const zoomConfigured = () => configuredZoomAccounts().length > 0;
 
 export const sessionIdFromReference = (reference) => {
   if (typeof reference !== 'string') return null;
@@ -13,68 +25,107 @@ export const sessionIdFromReference = (reference) => {
     return Number.isSafeInteger(id) ? id : null;
   }
   if (!/^s_[A-Za-z0-9_-]+$/.test(reference)) return null;
-
   try {
-    const encoded = reference.slice(2);
-    const decoded = Buffer.from(encoded, 'base64url').toString('utf8');
+    const decoded = Buffer.from(reference.slice(2), 'base64url').toString('utf8');
     const id = Number(decoded);
-    return /^[1-9]\d*$/.test(decoded)
-      && Number.isSafeInteger(id)
-      && sessionReferenceFor(id) === reference
-      ? id
-      : null;
+    const canonical = `s_${Buffer.from(String(id), 'utf8').toString('base64url')}`;
+    return /^[1-9]\d*$/.test(decoded) && Number.isSafeInteger(id) && canonical === reference ? id : null;
   } catch {
     return null;
   }
 };
 
-// Stable Zoom room names are keyed and do not reveal the sequential database id.
-export const sessionNameFor = (sessionId) => {
-  const digest = createHmac('sha256', config.zoom.sdkSecret || config.jwtSecret)
-    .update(`live-session:${sessionId}`)
-    .digest('hex')
-    .slice(0, 26);
-  return `class_${digest}`;
+const getAccessToken = async (key, account) => {
+  const cached = tokenCache.get(key);
+  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.accessToken;
+
+  const credentials = Buffer.from(`${account.clientId}:${account.clientSecret}`).toString('base64');
+  const url = new URL('https://zoom.us/oauth/token');
+  url.searchParams.set('grant_type', 'account_credentials');
+  url.searchParams.set('account_id', account.accountId);
+  const response = await fetch(url, { method: 'POST', headers: { Authorization: `Basic ${credentials}` } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) {
+    const error = new Error(payload.reason || payload.error || 'Could not authenticate with the selected Zoom account.');
+    error.status = response.status === 401 ? 503 : 502;
+    throw error;
+  }
+  tokenCache.set(key, { accessToken: payload.access_token, expiresAt: Date.now() + Number(payload.expires_in || 3600) * 1000 });
+  return payload.access_token;
 };
 
-const isPlaceholder = (v) => !v || /YOUR_ZOOM/i.test(v);
-
-export const zoomConfigured = () => !isPlaceholder(config.zoom.sdkKey) && !isPlaceholder(config.zoom.sdkSecret);
-
-/**
- * Zoom *Video SDK* JWT (HS256).
- * Claims per Zoom docs: app_key, tpc (session name), role_type (1 host / 0 participant), version, iat, exp.
- * The SDK key + secret must come from a Video SDK app. Meeting SDK credentials produce "invalid signature".
- */
-export const generateVideoSdkToken = ({ sessionName, isHost, userIdentity, durationSeconds = 4 * 60 * 60 }) => {
-  if (!zoomConfigured()) {
-    // Fail loudly: a token signed with a fake secret is rejected by Zoom with no useful message.
-    const err = new Error('Zoom Video SDK key/secret are not configured on the server.');
-    err.status = 503;
-    throw err;
+const zoomApi = async (key, account, path, { method = 'GET', body } = {}) => {
+  const accessToken = await getAccessToken(key, account);
+  const response = await fetch(`https://api.zoom.us/v2${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.message || payload.reason || `Zoom API request failed (${response.status}).`);
+    error.status = response.status === 401 || response.status === 403 ? 503 : 502;
+    throw error;
   }
+  return payload;
+};
 
-  const iat = Math.floor(Date.now() / 1000) - 30; // clock-skew buffer
-  const exp = iat + durationSeconds;
+const meetingInput = ({ title, planStart, planEnd }) => ({
+  topic: String(title || 'Live class').trim().slice(0, 200),
+  type: 2,
+  start_time: new Date(planStart).toISOString(),
+  duration: Math.max(1, Math.ceil((new Date(planEnd).getTime() - new Date(planStart).getTime()) / 60_000)),
+  timezone: 'UTC',
+  password: randomBytes(5).toString('hex'),
+  settings: { waiting_room: true, join_before_host: false, host_video: true, participant_video: true },
+});
 
-  const token = jwt.sign(
-    {
-      app_key: config.zoom.sdkKey,
-      tpc: sessionName,
-      role_type: isHost ? 1 : 0,
-      user_identity: String(userIdentity),
-      // session_key is a Zoom *password* field — omit it unless you intentionally
-      // want a password-protected session. Including it causes Zoom to reject joiners
-      // that don't supply the matching password and triggers endless RECONNECTING_MEETING.
-      version: 1,
-      iat,
-      exp,
-    },
-    config.zoom.sdkSecret,
-    // Do not set jsonwebtoken's `noTimestamp`: it removes the explicitly supplied `iat` claim.
-    // Zoom requires `iat` for Video SDK JWTs; omitting it can surface as SESSION_FETCH_INFO_ERROR (200).
-    { algorithm: 'HS256' }
-  );
+export const createZoomMeeting = async (key, details) => {
+  const account = getAccount(key);
+  if (!account) {
+    const error = new Error(`Zoom account ${key === 'account2' ? '2' : '1'} is not configured.`);
+    error.status = 503;
+    throw error;
+  }
+  const meeting = await zoomApi(key, account, `/users/${encodeURIComponent(account.userId)}/meetings`, {
+    method: 'POST', body: meetingInput(details),
+  });
+  return { meetingId: String(meeting.id), passcode: meeting.password || '', joinUrl: meeting.join_url || '' };
+};
 
-  return { token, expiresAt: new Date(exp * 1000).toISOString() };
+export const updateZoomMeeting = async (key, meetingId, details) => {
+  const account = getAccount(key);
+  if (!account) throw Object.assign(new Error('The configured Zoom account is unavailable.'), { status: 503 });
+  const { password: _unused, ...body } = meetingInput(details);
+  await zoomApi(key, account, `/meetings/${encodeURIComponent(meetingId)}`, { method: 'PATCH', body });
+};
+
+export const deleteZoomMeeting = async (key, meetingId) => {
+  const account = getAccount(key);
+  if (!account || !meetingId) return;
+  await zoomApi(key, account, `/meetings/${encodeURIComponent(meetingId)}`, { method: 'DELETE' });
+};
+
+export const generateMeetingSdkToken = async ({ accountKey, meetingNumber, isHost }) => {
+  const account = getAccount(accountKey);
+  if (!account || !meetingNumber) {
+    const error = new Error('Zoom Meeting SDK and meeting account credentials are not configured.');
+    error.status = 503;
+    throw error;
+  }
+  const iat = Math.floor(Date.now() / 1000) - 30;
+  const exp = iat + 60 * 60 * 2;
+  const signature = jwt.sign({
+    appKey: account.sdkKey,
+    mn: String(meetingNumber),
+    role: isHost ? 1 : 0,
+    iat,
+    exp,
+    tokenExp: exp,
+  }, account.sdkSecret, { algorithm: 'HS256' });
+
+  const zak = isHost
+    ? (await zoomApi(accountKey, account, `/users/${encodeURIComponent(account.userId)}/token?type=zak`)).token
+    : undefined;
+  return { signature, zak, expiresAt: new Date(exp * 1000).toISOString() };
 };

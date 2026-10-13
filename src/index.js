@@ -54,8 +54,7 @@ const inlineHashes = (tag) => {
 const classroomCsp = [
   "default-src 'self'",
 
-  // blob: is required because the Zoom VideoSDK dynamically creates blob: URLs
-  // for lazy-loaded WASM/JS chunks (e.g. wmsc.min.js, audio worklets).
+  // The Meeting SDK uses blob: workers and media modules for browser media processing.
   `script-src 'self' blob: ${inlineHashes('script').join(
     ' '
   )} 'wasm-unsafe-eval' https://source.zoom.us https://*.zoom.us`,
@@ -68,8 +67,7 @@ const classroomCsp = [
 
   "media-src 'self' blob: https://zoom.us https://*.zoom.us",
 
-  // https://*.cloudfront.net is required because the Zoom SDK fetches
-  // JS sourcemap files (*.map) from its CloudFront CDN at runtime.
+  // Zoom serves some Meeting SDK runtime media modules from its CloudFront CDN.
   "connect-src 'self' https://zoom.us https://*.zoom.us wss://zoom.us wss://*.zoom.us https://*.cloudfront.net",
 
   "worker-src 'self' blob: https://zoom.us https://*.zoom.us",
@@ -179,7 +177,7 @@ app.use('/api', (_req, res, next) => {
  * ============================================================
  *
  * classroom.html needs special browser permissions because the
- * Zoom Video SDK uses camera/microphone/WebRTC inside the page.
+ * Zoom Meeting SDK uses camera/microphone/WebRTC inside the page.
  *
  * Android WebView can be stricter than desktop Chrome.
  *
@@ -229,7 +227,7 @@ app.use('/classroom.html', (_req, res, next) => {
       // Required by the Zoom media engine to prevent console violations:
       'screen-wake-lock=(self)',
       'compute-pressure=(self)',
-      // Zoom's JsMediaSDK uses the unload event (handleUnloadEvent) for cleanup.
+      // Zoom media cleanup uses the unload event during SDK shutdown.
       // Chrome 117+ blocks unload handlers via Permissions-Policy by default.
       'unload=(self)',
     ].join(', ')
@@ -277,11 +275,8 @@ app.get('/api/v1/health', (_req, res) => {
   });
 });
 
-// Retained for deployments with an explicitly configured scheduler. Vercel Cron is currently disabled.
+// Optional scheduler hook. Normal session reads also materialize upcoming schedule rows on demand.
 app.get('/api/v1/cron/live-sessions', async (req, res, next) => {
-  if (!config.recurringLiveClassesEnabled) {
-    return res.status(503).json({ success: false, error: 'Recurring live-class scheduling is temporarily disabled.' });
-  }
   const secret = process.env.CRON_SECRET || '';
   const supplied = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
   const expectedBuffer = Buffer.from(secret);
@@ -488,7 +483,7 @@ const start = async () => {
 
     if (!zoomConfigured()) {
       console.warn(
-        '[zoom] ZOOM_SDK_KEY / ZOOM_SDK_SECRET missing: live classes cannot issue join tokens.'
+        '[zoom] Zoom Meeting SDK and account credentials are missing: live classes cannot create or join Zoom meetings.'
       );
     }
 
@@ -506,12 +501,6 @@ const start = async () => {
       autoSubmitExpiredAttempts,
       30_000
     );
-    if (config.recurringLiveClassesEnabled && !process.env.VERCEL) {
-      setInterval(() => {
-        runLiveSessionScheduler().catch((error) => console.error('[live-scheduler] error', { code: String(error?.code || '').slice(0, 40) }));
-      }, 30_000);
-    }
-
     app.listen(
       config.port,
       () => {

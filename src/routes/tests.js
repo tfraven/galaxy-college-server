@@ -334,8 +334,10 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
   for (const subject of subjects) subject.maxMarks = subject.questionCount * Number(group.mark_per_q);
 
   const students = await sql`
-    SELECT u.id, u.username AS roll_no, u.full_name
+    SELECT u.id, u.username AS roll_no, u.full_name, st.father_name, st.caste,
+           c.name AS class_name, sec.name AS section_name
     FROM students st JOIN users u ON u.id = st.user_id
+    JOIN classes c ON c.id = st.class_id LEFT JOIN sections sec ON sec.id = st.section_id
     WHERE st.class_id = ${group.class_id} AND u.is_active = TRUE
     ORDER BY u.full_name, u.username
   `;
@@ -432,6 +434,8 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     const overallScore = submittedAt ? Math.max(0, Math.round(rawOverallScore * 100) / 100) : null;
     return {
       studentId: student.id, rollNo: student.roll_no, fullName: student.full_name,
+      fatherName: student.father_name || '', caste: student.caste || '',
+      className: student.class_name, sectionName: student.section_name || '',
       attempted: Boolean(masterAttempt || subjectAttempts.size), submittedAt,
       subjects: subjectResults,
       overall: {

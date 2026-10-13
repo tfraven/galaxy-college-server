@@ -27,6 +27,8 @@ const toStudentDto = (st, user) => st ? ({
   className: st.class_name,
   sectionId: st.section_id,
   sectionName: st.section_name,
+  fatherName: st.father_name || '',
+  caste: st.caste || '',
 }) : undefined;
 
 const signToken = (user, deviceId = null) => jwt.sign(
@@ -40,7 +42,8 @@ const validRequestId = (value) => typeof value === 'string' && /^[0-9a-f-]{36}$/
 
 const studentProfileFor = async (userId) => {
   const [st] = await sql`
-    SELECT s.user_id, s.class_id, s.section_id, c.name AS class_name, sec.name AS section_name
+    SELECT s.user_id, s.class_id, s.section_id, s.father_name, s.caste,
+           c.name AS class_name, sec.name AS section_name
     FROM students s JOIN classes c ON s.class_id = c.id
     LEFT JOIN sections sec ON s.section_id = sec.id WHERE s.user_id = ${userId}
   `;
