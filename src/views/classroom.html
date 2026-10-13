@@ -85,11 +85,12 @@
           var joinFinished = false;
           function shouldRetryObfJoin(error) {
             if (isHost || !obfToken) return false;
-            var errorCode = Number(error && (error.errorCode || error.code));
-            var errorText = [error && error.reason, error && error.message, error && error.exception]
+            var errorText = [error && error.errorCode, error && error.code, error && error.type,
+              error && error.reason, error && error.message, error && error.exception]
               .filter(Boolean).join(' ').toLowerCase();
-            return errorCode === 4011 || errorText.includes('authorized_user_not_inmeeting')
-              || errorText.includes('authorized user') && errorText.includes('meeting');
+            return errorText.includes('authorized_user_not_inmeeting')
+              || (errorText.includes('authorized user') && errorText.includes('meeting')
+                && /not in|not entered|not joined|absent/.test(errorText));
           }
           function handleJoinError(error) {
             if (joinFinished) return;
@@ -104,7 +105,7 @@
             }
             message.textContent = 'Could not join the Zoom meeting.';
             detail.textContent = errorCode === 4011
-              ? 'Zoom blocked this cross-account join. Confirm the Meeting SDK app was reviewed by Zoom and the linked Zoom account is authorized. OBF also requires its Zoom user to already be in the meeting.'
+              ? 'Zoom rejected this cross-account join (error 4011). The Meeting SDK app must pass Zoom Marketplace review and be activated or published (an approved unlisted app is also supported). After approval, confirm the participant linked a Zoom account; OBF also requires that user to already be in the meeting.'
               : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
             console.error('[classroom] Zoom join failed', {
               errorCode: errorCode || undefined,
