@@ -406,15 +406,22 @@ app.use((err, _req, res, _next) => {
       type: String(err.type || '').slice(0, 40),
     }
   );
+  if (err.zoom) console.error('[zoom-upstream-error]', err.zoom);
 
-  const message =
-    status === 413
-      ? 'Request body is too large.'
-      : status < 500
-        ? 'Invalid request.'
-        : status === 503
-          ? 'Service unavailable.'
-          : 'Internal server error';
+  let message;
+  if (err.zoom?.operation === 'zak-token') {
+    message = 'Zoom could not issue the host token. Check the selected account’s USER_ID and the OAuth app’s user:read:token:admin scope.';
+  } else if (err.zoom?.operation === 'oauth-token') {
+    message = 'Zoom authentication failed. Verify the selected account’s Account ID, OAuth Client ID, and Client Secret.';
+  } else if (status === 413) {
+    message = 'Request body is too large.';
+  } else if (status < 500) {
+    message = 'Invalid request.';
+  } else if (status === 503) {
+    message = 'Service unavailable.';
+  } else {
+    message = 'Internal server error';
+  }
 
   res.status(status).json({
     success: false,

@@ -50,6 +50,12 @@ const getAccessToken = async (key, account) => {
   if (!response.ok || !payload.access_token) {
     const error = new Error(payload.reason || payload.error || 'Could not authenticate with the selected Zoom account.');
     error.status = response.status === 401 ? 503 : 502;
+    error.zoom = {
+      account: key,
+      operation: 'oauth-token',
+      status: response.status,
+      code: String(payload.error || payload.reason || '').slice(0, 64),
+    };
     throw error;
   }
   tokenCache.set(key, { accessToken: payload.access_token, expiresAt: Date.now() + Number(payload.expires_in || 3600) * 1000 });
@@ -67,6 +73,12 @@ const zoomApi = async (key, account, path, { method = 'GET', body } = {}) => {
   if (!response.ok) {
     const error = new Error(payload.message || payload.reason || `Zoom API request failed (${response.status}).`);
     error.status = response.status === 401 || response.status === 403 ? 503 : 502;
+    error.zoom = {
+      account: key,
+      operation: path.includes('/token?type=zak') ? 'zak-token' : 'api-request',
+      status: response.status,
+      code: String(payload.code || '').slice(0, 64),
+    };
     throw error;
   }
   return payload;
