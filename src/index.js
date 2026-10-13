@@ -61,14 +61,14 @@ const classroomCsp = [
 
   "style-src 'self' 'unsafe-inline' https://source.zoom.us https://*.zoom.us",
 
-  "img-src 'self' data: blob: https://zoom.us https://*.zoom.us",
+  "img-src 'self' data: blob: https://zoom.us https://*.zoom.us https://zoomdev.us https://*.zoomdev.us",
 
   "font-src 'self' data: https://zoom.us https://*.zoom.us",
 
   "media-src 'self' blob: https://zoom.us https://*.zoom.us",
 
   // Zoom serves some Meeting SDK runtime media modules from its CloudFront CDN.
-  "connect-src 'self' https://zoom.us https://*.zoom.us wss://zoom.us wss://*.zoom.us https://*.cloudfront.net",
+  "connect-src 'self' https://zoom.us https://*.zoom.us https://zoomdev.us https://*.zoomdev.us wss://zoom.us wss://*.zoom.us https://*.cloudfront.net",
 
   "worker-src 'self' blob: https://zoom.us https://*.zoom.us",
 

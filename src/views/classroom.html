@@ -81,23 +81,45 @@
         success: function () {
           message.textContent = 'Joining the Zoom meeting…';
           detail.textContent = 'Waiting for Zoom to connect you to the class.';
-          window.ZoomMtg.join({
-            signature: signature,
-            meetingNumber: meetingNumber,
-            passWord: password,
-            userName: userName,
-            zak: zak,
-            success: function () {
-              status.style.display = 'none';
-              document.getElementById('zmmtg-root').style.display = 'block';
-              postClassroomEvent('joined');
-            },
-            error: function (error) {
-              message.textContent = 'Could not join the Zoom meeting.';
-              detail.textContent = error && error.message ? error.message : 'Check that the meeting is live and try again.';
-              postClassroomEvent('error', detail.textContent);
-            },
-          });
+          var joinFinished = false;
+          function handleJoinError(error) {
+            if (joinFinished) return;
+            joinFinished = true;
+            var errorCode = Number(error && (error.errorCode || error.code));
+            message.textContent = 'Could not join the Zoom meeting.';
+            detail.textContent = errorCode === 4011
+              ? 'Zoom blocked this cross-account join. Use the Zoom account linked to this SDK app, or have the SDK app reviewed by Zoom and configure participant authentication with ZAK or OBF.'
+              : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
+            console.error('[classroom] Zoom join failed', {
+              errorCode: errorCode || undefined,
+              reason: error && error.reason,
+              message: error && error.message,
+            });
+            postClassroomEvent('error', detail.textContent);
+          }
+
+          try {
+            var joinResult = window.ZoomMtg.join({
+              signature: signature,
+              meetingNumber: meetingNumber,
+              passWord: password,
+              userName: userName,
+              zak: zak,
+              success: function () {
+                if (joinFinished) return;
+                joinFinished = true;
+                status.style.display = 'none';
+                document.getElementById('zmmtg-root').style.display = 'block';
+                postClassroomEvent('joined');
+              },
+              error: handleJoinError,
+            });
+            if (joinResult && typeof joinResult.catch === 'function') {
+              joinResult.catch(handleJoinError);
+            }
+          } catch (error) {
+            handleJoinError(error);
+          }
         },
         error: function (error) {
           message.textContent = 'Could not start the Zoom meeting.';
