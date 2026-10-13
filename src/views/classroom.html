@@ -83,11 +83,25 @@
           message.textContent = 'Joining the Zoom meeting…';
           detail.textContent = 'Waiting for Zoom to connect you to the class.';
           var joinFinished = false;
+          function shouldRetryObfJoin(error) {
+            if (isHost || !obfToken) return false;
+            var errorCode = Number(error && (error.errorCode || error.code));
+            var errorText = [error && error.reason, error && error.message, error && error.exception]
+              .filter(Boolean).join(' ').toLowerCase();
+            return errorCode === 4011 || errorText.includes('authorized_user_not_inmeeting')
+              || errorText.includes('authorized user') && errorText.includes('meeting');
+          }
           function handleJoinError(error) {
             if (joinFinished) return;
             joinFinished = true;
             window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
             var errorCode = Number(error && (error.errorCode || error.code));
+            if (shouldRetryObfJoin(error)) {
+              message.textContent = 'Waiting for the authorized Zoom user…';
+              detail.textContent = 'Reconnecting in a moment. The Zoom account linked for this session must already be in the meeting.';
+              postClassroomEvent('obf-retry', detail.textContent);
+              return;
+            }
             message.textContent = 'Could not join the Zoom meeting.';
             detail.textContent = errorCode === 4011
               ? 'Zoom blocked this cross-account join. Confirm the Meeting SDK app was reviewed by Zoom and the linked Zoom account is authorized. OBF also requires its Zoom user to already be in the meeting.'
