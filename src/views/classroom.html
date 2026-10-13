@@ -85,6 +85,7 @@
           function handleJoinError(error) {
             if (joinFinished) return;
             joinFinished = true;
+            window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
             var errorCode = Number(error && (error.errorCode || error.code));
             message.textContent = 'Could not join the Zoom meeting.';
             detail.textContent = errorCode === 4011
@@ -97,7 +98,16 @@
             });
             postClassroomEvent('error', detail.textContent);
           }
+          function handleUnhandledJoinRejection(event) {
+            if (joinFinished) return;
+            var error = event && event.reason;
+            var errorCode = Number(error && (error.errorCode || error.code));
+            if (errorCode !== 4011 && (!error || error.type !== 'JOIN_MEETING_FAILED')) return;
+            event.preventDefault();
+            handleJoinError(error);
+          }
 
+          window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
           try {
             var joinResult = window.ZoomMtg.join({
               signature: signature,
@@ -108,6 +118,7 @@
               success: function () {
                 if (joinFinished) return;
                 joinFinished = true;
+                window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
                 status.style.display = 'none';
                 document.getElementById('zmmtg-root').style.display = 'block';
                 postClassroomEvent('joined');
