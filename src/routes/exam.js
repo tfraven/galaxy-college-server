@@ -25,11 +25,13 @@ examRouter.post('/start', requireRole(ROLE.STUDENT), asyncHandler(async (req, re
   if (testId === null) return fail(res, 400, 'testId is required');
   const studentId = req.user.id;
 
-  const test = await loadTest(testId);
+  const [test, enrol] = await Promise.all([
+    loadTest(testId),
+    getStudentEnrolment(studentId),
+  ]);
   if (!test) return fail(res, 404, 'Test not found');
   if (test.status !== 2) return fail(res, 403, 'This test is not available.');
 
-  const enrol = await getStudentEnrolment(studentId);
   if (!enrol || enrol.class_id !== test.course_class_id || (test.section_id && test.section_id !== enrol.section_id)) {
     return fail(res, 403, 'This test is not for your class/section.');
   }
@@ -58,10 +60,9 @@ examRouter.post('/start', requireRole(ROLE.STUDENT), asyncHandler(async (req, re
     attempt = done.attempt;
   }
 
-  const [{ n: questionCount }] = await sql`SELECT COUNT(*)::int AS n FROM test_questions WHERE test_id = ${testId}`;
-  const dto = publicResult(describeAttempt(attempt, test, questionCount), resultsVisible(test, now));
-
   if (attempt.submitted_at) {
+    const [{ n: questionCount }] = await sql`SELECT COUNT(*)::int AS n FROM test_questions WHERE test_id = ${testId}`;
+    const dto = publicResult(describeAttempt(attempt, test, questionCount), resultsVisible(test, now));
     return res.json({
       success: true,
       data: {
@@ -71,17 +72,21 @@ examRouter.post('/start', requireRole(ROLE.STUDENT), asyncHandler(async (req, re
     });
   }
 
-  const answers = await sql`SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${attempt.id}`;
-  const answersMap = Object.fromEntries(answers.map((a) => [a.question_id, a.chosen]));
+  // Parallelize answers and questions query (EXM-8: correct answers are NEVER selected here).
+  const [answers, raw] = await Promise.all([
+    sql`SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${attempt.id}`,
+    sql`
+      SELECT q.id, q.course_id, s.name AS subject_name, q.topic, q.body, q.image,
+             q.opt_a, q.opt_b, q.opt_c, q.opt_d
+      FROM questions q JOIN test_questions tq ON q.id = tq.question_id
+      JOIN courses c ON c.id = q.course_id JOIN subjects s ON s.id = c.subject_id
+      WHERE tq.test_id = ${testId} ORDER BY tq.question_order NULLS LAST, q.id ASC
+    `
+  ]);
 
-  // EXM-8: correct answers are NEVER selected here.
-  const raw = await sql`
-    SELECT q.id, q.course_id, s.name AS subject_name, q.topic, q.body, q.image,
-           q.opt_a, q.opt_b, q.opt_c, q.opt_d
-    FROM questions q JOIN test_questions tq ON q.id = tq.question_id
-    JOIN courses c ON c.id = q.course_id JOIN subjects s ON s.id = c.subject_id
-    WHERE tq.test_id = ${testId} ORDER BY tq.question_order NULLS LAST, q.id ASC
-  `;
+  const answersMap = Object.fromEntries(answers.map((a) => [a.question_id, a.chosen]));
+  const questionCount = raw.length;
+  const dto = publicResult(describeAttempt(attempt, test, questionCount), resultsVisible(test, now));
 
   let questions = raw.map((q) => {
     let options = [
@@ -158,14 +163,34 @@ examRouter.post('/submit', requireRole(ROLE.STUDENT), asyncHandler(async (req, r
 // RES-4: review. Owner (or staff of that course) only, only after submission, only when results are released.
 examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
   const attemptId = toInt(req.params.attemptId);
-  const [attempt] = await sql`SELECT * FROM attempts WHERE id = ${attemptId}`;
-  if (!attempt) return fail(res, 404, 'Attempt not found');
-
-  const [test] = await sql`
-    SELECT t.*, s.name AS "subjectName", cl.name AS "className"
-    FROM tests t JOIN courses c ON t.course_id = c.id JOIN subjects s ON c.subject_id = s.id JOIN classes cl ON c.class_id = cl.id
-    WHERE t.id = ${attempt.test_id}
+  const [row] = await sql`
+    SELECT a.id AS attempt_id, a.test_id, a.student_id, a.seed, a.score, a.percentage, a.grade,
+           a.correct_cnt, a.wrong_cnt, a.unanswered_cnt, a.started_at, a.deadline_at, a.submitted_at,
+           t.id AS "t_id", t.course_id, t.title, t.duration_min, t.mark_per_q, t.shuffle_q, t.shuffle_opt,
+           t.result_mode, t.results_released, t.status, t.start_at, t.end_at, t.grand_test_id,
+           s.name AS "subjectName", cl.name AS "className"
+    FROM attempts a
+    JOIN tests t ON a.test_id = t.id
+    JOIN courses c ON t.course_id = c.id
+    JOIN subjects s ON c.subject_id = s.id
+    JOIN classes cl ON c.class_id = cl.id
+    WHERE a.id = ${attemptId}
   `;
+  if (!row) return fail(res, 404, 'Attempt not found');
+
+  const attempt = {
+    id: row.attempt_id, test_id: row.test_id, student_id: row.student_id, seed: row.seed,
+    score: row.score, percentage: row.percentage, grade: row.grade,
+    correct_cnt: row.correct_cnt, wrong_cnt: row.wrong_cnt, unanswered_cnt: row.unanswered_cnt,
+    started_at: row.started_at, deadline_at: row.deadline_at, submitted_at: row.submitted_at,
+  };
+  const test = {
+    id: row.t_id, course_id: row.course_id, title: row.title, duration_min: row.duration_min,
+    mark_per_q: row.mark_per_q, shuffle_q: row.shuffle_q, shuffle_opt: row.shuffle_opt,
+    result_mode: row.result_mode, results_released: row.results_released, status: row.status,
+    start_at: row.start_at, end_at: row.end_at, grand_test_id: row.grand_test_id,
+    subjectName: row.subjectName, className: row.className,
+  };
 
   const staff = STAFF_ROLES.includes(req.user.role);
   if (staff) {
@@ -176,14 +201,16 @@ examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
     if (!resultsVisible(test)) return fail(res, 403, 'Results have not been released yet.');
   }
 
-  const questions = await sql`
-    SELECT q.id, q.course_id, s.name AS subject_name, q.topic, q.body, q.image,
-           q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.correct, q.explanation
-    FROM questions q JOIN test_questions tq ON q.id = tq.question_id
-    JOIN courses c ON c.id = q.course_id JOIN subjects s ON s.id = c.subject_id
-    WHERE tq.test_id = ${test.id} ORDER BY tq.question_order NULLS LAST, q.id ASC
-  `;
-  const answers = await sql`SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${attemptId}`;
+  const [questions, answers] = await Promise.all([
+    sql`
+      SELECT q.id, q.course_id, s.name AS subject_name, q.topic, q.body, q.image,
+             q.opt_a, q.opt_b, q.opt_c, q.opt_d, q.correct, q.explanation
+      FROM questions q JOIN test_questions tq ON q.id = tq.question_id
+      JOIN courses c ON c.id = q.course_id JOIN subjects s ON s.id = c.subject_id
+      WHERE tq.test_id = ${test.id} ORDER BY tq.question_order NULLS LAST, q.id ASC
+    `,
+    sql`SELECT question_id, chosen FROM attempt_answers WHERE attempt_id = ${attemptId}`
+  ]);
   const chosenBy = new Map(answers.map((a) => [a.question_id, a.chosen]));
 
   const reviewQuestions = questions.map((q) => {

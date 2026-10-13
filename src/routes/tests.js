@@ -323,7 +323,7 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
   }));
   const subjectByCourseId = new Map(subjects.map((subject) => [subject.id, subject]));
   const questions = await sql`
-    SELECT q.id, q.course_id, q.correct
+    SELECT q.id, q.course_id, q.body, q.topic, q.correct
     FROM test_questions tq JOIN questions q ON q.id = tq.question_id
     WHERE tq.test_id = ${master.id} ORDER BY tq.question_order NULLS LAST, q.id
   `;
@@ -368,6 +368,7 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
   const questionBySubject = new Map(subjects.map((subject) => [subject.id, []]));
   for (const question of questions) questionBySubject.get(question.course_id)?.push(question);
 
+  const analyticsAnswersByStudent = new Map();
   const reportRows = students.map((student) => {
     const studentAttempts = attemptsByStudent.get(student.id) || { master: null, subjects: new Map() };
     const masterAttempt = studentAttempts.master;
@@ -385,6 +386,15 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     for (const attempt of attemptsToRead) {
       for (const [questionId, chosen] of answerByAttempt.get(attempt.id) || []) studentAnswers.set(questionId, chosen);
     }
+    const submittedAttemptsToRead = masterAttempt
+      ? (submittedMaster ? [masterAttempt] : [])
+      : [...subjectAttempts.values()].filter((attempt) => attempt.submitted_at);
+    const submittedAnswers = new Map();
+    for (const attempt of submittedAttemptsToRead) {
+      for (const [questionId, chosen] of answerByAttempt.get(attempt.id) || []) submittedAnswers.set(questionId, chosen);
+    }
+    analyticsAnswersByStudent.set(student.id, submittedAnswers);
+
     const subjectResults = {};
     let totalCorrect = 0;
     let totalWrong = 0;
@@ -411,7 +421,10 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
       const score = subjectSubmitted ? Math.max(0, Math.round(rawScore * 100) / 100) : null;
       subjectResults[subject.id] = {
         correct, wrong, unanswered, score, maxMarks: subject.maxMarks,
-        percentage: score === null || !subject.maxMarks ? null : Math.round((score / subject.maxMarks) * 100), rank: null,
+        percentage: score === null || !subject.maxMarks ? null : Math.round((score / subject.maxMarks) * 100),
+        rank: null,
+        attempted: Boolean(masterAttempt || subjectAttempt),
+        submittedAt: subjectSubmitted ? masterAttempt?.submitted_at || subjectAttempt?.submitted_at || null : null,
       };
     }
     const overallMaxMarks = questions.length * Number(group.mark_per_q);
@@ -448,12 +461,43 @@ testsRouter.get('/grand/:id/results', requireRole(ROLE.ADMIN, ROLE.OPERATOR), as
     });
   }
 
+  const questionAnalytics = questions.map((question, index) => {
+    const subject = subjectByCourseId.get(question.course_id);
+    const breakdown = { A: 0, B: 0, C: 0, D: 0 };
+    let submittedCount = 0;
+    let totalResponses = 0;
+    let correctCount = 0;
+    for (const student of reportRows) {
+      if (student.subjects[question.course_id]?.score === null) continue;
+      submittedCount += 1;
+      const chosen = analyticsAnswersByStudent.get(student.studentId)?.get(question.id);
+      if (!chosen) continue;
+      if (Object.hasOwn(breakdown, chosen)) breakdown[chosen] += 1;
+      totalResponses += 1;
+      if (chosen === question.correct) correctCount += 1;
+    }
+    return {
+      questionId: question.id,
+      questionNumber: index + 1,
+      subjectId: question.course_id,
+      subjectName: subject?.name || 'Subject',
+      body: question.body,
+      topic: question.topic,
+      correct: question.correct,
+      submittedCount,
+      totalResponses,
+      unanswered: submittedCount - totalResponses,
+      breakdown,
+      accuracy: totalResponses ? Math.round((correctCount / totalResponses) * 100) : 0,
+    };
+  });
+
   res.json({ success: true, data: {
     id: group.id, title: group.title, classId: group.class_id, className: group.class_name,
     status: group.status, totalQuestions: questions.length,
     totalMarks: questions.length * Number(group.mark_per_q),
     submittedCount: reportRows.filter((row) => row.submittedAt).length,
-    subjects, students: reportRows,
+    subjects, students: reportRows, questionAnalytics,
   } });
 }));
 
