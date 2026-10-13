@@ -34,20 +34,38 @@
       var zak = values.get('z') || undefined;
       var isHost = values.get('h') === '1';
       var leftUrl = window.location.origin + window.location.pathname + '?left=1';
+      function postClassroomEvent(name, messageText) {
+        var payload = { type: 'galaxy-classroom-' + name };
+        if (messageText) payload.message = messageText;
+        try { window.parent.postMessage(payload, '*'); } catch (error) {}
+        try {
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        } catch (error) {}
+        try {
+          if (window.GalaxyClassroom && window.GalaxyClassroom.postEvent) {
+            window.GalaxyClassroom.postEvent(JSON.stringify(payload));
+          }
+        } catch (error) {}
+      }
 
       if (new URLSearchParams(window.location.search).has('left')) {
         message.textContent = 'You left the live class.';
         detail.textContent = 'Close this window to return to Galaxy College.';
+        postClassroomEvent('left');
         return;
       }
       if (!signature || !meetingNumber || (isHost && !zak)) {
         message.textContent = 'Could not open this live class.';
         detail.textContent = 'The meeting details are missing or have expired. Return to the live classes page and join again.';
+        postClassroomEvent('error', detail.textContent);
         return;
       }
       if (!window.ZoomMtg) {
         message.textContent = 'Zoom Meeting SDK could not be loaded.';
         detail.textContent = 'Check your connection and try again.';
+        postClassroomEvent('error', detail.textContent);
         return;
       }
 
@@ -68,17 +86,19 @@
             success: function () {
               status.style.display = 'none';
               document.getElementById('zmmtg-root').style.display = 'block';
-              try { window.parent.postMessage({ type: 'galaxy-classroom-joined' }, '*'); } catch (error) {}
+              postClassroomEvent('joined');
             },
             error: function (error) {
               message.textContent = 'Could not join the Zoom meeting.';
               detail.textContent = error && error.message ? error.message : 'Check that the meeting is live and try again.';
+              postClassroomEvent('error', detail.textContent);
             },
           });
         },
         error: function (error) {
           message.textContent = 'Could not start the Zoom meeting.';
           detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
+          postClassroomEvent('error', detail.textContent);
         },
       });
     }());
