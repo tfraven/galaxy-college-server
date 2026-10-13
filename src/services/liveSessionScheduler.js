@@ -1,6 +1,6 @@
 import { sql } from '../db/connection.js';
 import { notifyStudents } from './notifications.js';
-import { createZoomMeeting } from './zoom.js';
+import { createZoomMeeting, deleteZoomMeeting } from './zoom.js';
 
 const localDateParts = (date, timeZone) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -38,7 +38,7 @@ const zonedLocalDateTimeToUtc = (date, time, timeZone) => {
 const weekdayFor = ({ year, month, day }) => new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 
 /**
- * Creates each occurrence once and advances scheduled/live rows from wall-clock times.
+ * Keeps one upcoming/live occurrence per recurring schedule and advances it from wall-clock times.
  * Called on session-list reads and by the optional authenticated platform cron endpoint.
  */
 export const runLiveSessionScheduler = async (now = new Date()) => {
@@ -77,47 +77,76 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
         });
       }
     }
+    // Clean up the backlog created by older scheduler behavior. Keep any already-live
+    // session; otherwise keep only the nearest scheduled occurrence for this schedule.
+    const activeOccurrences = await sql`
+      SELECT id, status, zoom_account, zoom_meeting_id FROM live_sessions
+      WHERE recurring_schedule_id = ${schedule.id}
+        AND status IN (1, 2) AND plan_end > ${now.toISOString()}
+        AND deleted_at IS NULL
+      ORDER BY CASE WHEN status = 2 THEN 0 ELSE 1 END, plan_start, id
+    `;
+    const liveOccurrences = activeOccurrences.filter(({ status }) => Number(status) === 2);
+    const scheduledOccurrences = activeOccurrences.filter(({ status }) => Number(status) === 1);
+    const scheduledToKeep = liveOccurrences.length ? [] : scheduledOccurrences.slice(0, 1);
+    const keepIds = new Set([...liveOccurrences, ...scheduledToKeep].map(({ id }) => Number(id)));
+    const obsoleteOccurrences = scheduledOccurrences.filter(({ id }) => !keepIds.has(Number(id)));
+    if (obsoleteOccurrences.length) {
+      const obsoleteIds = obsoleteOccurrences.map(({ id }) => id);
+      await sql`
+        DELETE FROM notifications WHERE related_type = 'live_session' AND related_id = ANY(${obsoleteIds}::int[])
+      `;
+      await sql`DELETE FROM live_sessions WHERE id = ANY(${obsoleteIds}::int[]) AND status = 1`;
+      await Promise.allSettled(obsoleteOccurrences.map(({ zoom_account, zoom_meeting_id }) =>
+        deleteZoomMeeting(zoom_account || 'account1', zoom_meeting_id)));
+    }
+
+    // Do not pre-create a backlog of future sessions. A recurring schedule gets its
+    // next occurrence only after its current scheduled/live occurrence has ended.
+    if (activeOccurrences.length) continue;
+
+    occurrences.sort((a, b) => a.start - b.start);
     const existingOccurrences = occurrences.length
       ? await sql`SELECT recurrence_key FROM live_sessions WHERE recurring_schedule_id = ${schedule.id} AND recurrence_key = ANY(${occurrences.map(({ key }) => key)}::text[])`
       : [];
     const existingKeys = new Set(existingOccurrences.map(({ recurrence_key }) => recurrence_key));
-    for (const occurrence of occurrences) {
-      if (existingKeys.has(occurrence.key)) continue;
-        const meeting = await createZoomMeeting(schedule.zoom_account || 'account1', {
-          title: schedule.title,
-          planStart: occurrence.start,
-          planEnd: occurrence.end,
-        });
-        const [session] = await sql`
-          INSERT INTO live_sessions (
-            class_id, section_id, course_name, title, host_id, plan_start, plan_end,
-            status, created_by, recurring_schedule_id, recurrence_key, video_enabled,
-            zoom_account, zoom_meeting_id, zoom_passcode, zoom_join_url
-          )
-          SELECT class_id, section_id, course_name, title, host_id, ${occurrence.start.toISOString()}, ${occurrence.end.toISOString()},
-                 1, created_by, id, ${occurrence.key}, TRUE, ${schedule.zoom_account || 'account1'},
-                 ${meeting.meetingId}, ${meeting.passcode}, ${meeting.joinUrl}
-          FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE AND deleted_at IS NULL
-          ON CONFLICT (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL DO NOTHING
-          RETURNING id, class_id, section_id, course_name, title, plan_start
-        `;
-        if (!session) continue;
-        const allowedIds = Array.isArray(schedule.video_participant_ids) ? schedule.video_participant_ids : [];
-        if (allowedIds.length) {
-          await sql`
-            INSERT INTO video_participant_sessions (session_id, user_id, created_by)
-            SELECT ${session.id}, value, ${schedule.host_id} FROM unnest(${allowedIds}::int[]) AS value
-            ON CONFLICT DO NOTHING
-          `;
-        }
-        created += 1;
-        await notifyStudents({
-          type: 'live_scheduled', title: `Live class scheduled: ${session.title}`,
-          body: `${session.course_name || 'General'} • ${new Date(session.plan_start).toLocaleString()}`,
-          relatedType: 'live_session', relatedId: session.id, eventKey: `live_scheduled:${session.id}`,
-          classId: session.class_id, sectionId: session.section_id,
-        });
+    const occurrence = occurrences.find(({ key }) => !existingKeys.has(key));
+    if (!occurrence) continue;
+
+    const meeting = await createZoomMeeting(schedule.zoom_account || 'account1', {
+      title: schedule.title,
+      planStart: occurrence.start,
+      planEnd: occurrence.end,
+    });
+    const [session] = await sql`
+      INSERT INTO live_sessions (
+        class_id, section_id, course_name, title, host_id, plan_start, plan_end,
+        status, created_by, recurring_schedule_id, recurrence_key, video_enabled,
+        zoom_account, zoom_meeting_id, zoom_passcode, zoom_join_url
+      )
+      SELECT class_id, section_id, course_name, title, host_id, ${occurrence.start.toISOString()}, ${occurrence.end.toISOString()},
+             1, created_by, id, ${occurrence.key}, TRUE, ${schedule.zoom_account || 'account1'},
+             ${meeting.meetingId}, ${meeting.passcode}, ${meeting.joinUrl}
+      FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE AND deleted_at IS NULL
+      ON CONFLICT (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL DO NOTHING
+      RETURNING id, class_id, section_id, course_name, title, plan_start
+    `;
+    if (!session) continue;
+    const allowedIds = Array.isArray(schedule.video_participant_ids) ? schedule.video_participant_ids : [];
+    if (allowedIds.length) {
+      await sql`
+        INSERT INTO video_participant_sessions (session_id, user_id, created_by)
+        SELECT ${session.id}, value, ${schedule.host_id} FROM unnest(${allowedIds}::int[]) AS value
+        ON CONFLICT DO NOTHING
+      `;
     }
+    created += 1;
+    await notifyStudents({
+      type: 'live_scheduled', title: `Live class scheduled: ${session.title}`,
+      body: `${session.course_name || 'General'} • ${new Date(session.plan_start).toLocaleString()}`,
+      relatedType: 'live_session', relatedId: session.id, eventKey: `live_scheduled:${session.id}`,
+      classId: session.class_id, sectionId: session.section_id,
+    });
   }
 
   const started = await sql`

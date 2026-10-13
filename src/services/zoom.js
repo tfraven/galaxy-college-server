@@ -133,6 +133,7 @@ export const generateMeetingSdkToken = async ({ accountKey, meetingNumber, isHos
     appKey: account.sdkKey,
     mn: String(meetingNumber),
     role: isHost ? 1 : 0,
+    video_webrtc_mode: 1,
     iat,
     exp,
     tokenExp: exp,
