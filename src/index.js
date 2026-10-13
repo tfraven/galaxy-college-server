@@ -411,6 +411,12 @@ app.use((err, _req, res, _next) => {
   let message;
   if (err.zoom?.operation === 'zak-token') {
     message = 'Zoom could not issue the host token. Check the selected account’s USER_ID and the OAuth app’s user:read:token:admin scope.';
+  } else if (err.zoom?.operation === 'participant-token' && err.zoom?.code === 'zoom_account_not_linked') {
+    message = 'Connect your Zoom account from your profile before joining a live class.';
+  } else if (err.zoom?.operation === 'participant-token') {
+    message = 'Zoom could not authorize your participant identity. Check the user OAuth app scopes or reconnect your Zoom account.';
+  } else if (err.zoom?.operation === 'user-oauth-token') {
+    message = 'Zoom authorization failed. Try connecting your Zoom account again.';
   } else if (err.zoom?.operation === 'oauth-token') {
     message = 'Zoom authentication failed. Verify the selected account’s Account ID, OAuth Client ID, and Client Secret.';
   } else if (status === 413) {

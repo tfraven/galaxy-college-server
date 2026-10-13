@@ -46,6 +46,7 @@ authRouter.delete('/zoom/connection', authenticate, asyncHandler(async (req, res
 // Zoom redirects here without the Galaxy College bearer token; the one-time state binds the
 // authorization response to the local user who started the link flow.
 authRouter.get('/zoom/callback', asyncHandler(async (req, res) => {
+  if (!config.frontendUrl) return res.status(503).send('Zoom user authorization is not configured.');
   const state = typeof req.query.state === 'string' ? req.query.state : '';
   const stateHash = /^[0-9a-f]{64}$/i.test(state) ? createHash('sha256').update(state).digest('hex') : '';
   const [savedState] = stateHash ? await sql`

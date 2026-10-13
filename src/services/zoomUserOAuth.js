@@ -8,7 +8,12 @@ const oauthConfig = () => config.zoomUserOAuth;
 
 export const zoomUserOAuthConfigured = () => {
   const oauth = oauthConfig();
-  return Boolean(oauth.clientId && oauth.clientSecret && oauth.redirectUri && config.frontendUrl && /^[0-9a-f]{64}$/i.test(oauth.encryptionKey));
+  let frontendIsOrigin = false;
+  try {
+    const frontend = new URL(config.frontendUrl);
+    frontendIsOrigin = ['http:', 'https:'].includes(frontend.protocol) && frontend.origin === config.frontendUrl;
+  } catch {}
+  return Boolean(oauth.clientId && oauth.clientSecret && oauth.redirectUri && frontendIsOrigin && /^[0-9a-f]{64}$/i.test(oauth.encryptionKey));
 };
 
 const requireOAuthConfig = () => {
@@ -66,7 +71,7 @@ const zoomApiAsUser = async (accessToken, path) => {
       ? 'Zoom authorization expired. Reconnect your Zoom account.'
       : 'Zoom could not authorize this meeting. Check the Zoom app scopes and try again.');
     error.status = response.status === 401 ? 409 : 502;
-    error.zoom = { operation: path.includes('/token?type=') ? 'participant-token' : 'user-profile', status: response.status, code: String(payload.code || '').slice(0, 64) };
+    error.zoom = { operation: path.includes('/token?type=') || path.endsWith('/zak') ? 'participant-token' : 'user-profile', status: response.status, code: String(payload.code || '').slice(0, 64) };
     throw error;
   }
   return payload;
