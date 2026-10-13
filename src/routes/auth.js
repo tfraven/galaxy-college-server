@@ -6,8 +6,68 @@ import { sql } from '../db/connection.js';
 import { config } from '../config/index.js';
 import { asyncHandler, authenticate, fail, ROLE, requireRole } from '../middleware/auth.js';
 import { consumeLoginRateLimit } from '../services/loginRateLimit.js';
+import {
+  createZoomOAuthAuthorizationUrl, exchangeZoomOAuthCode, getZoomUserConnectionStatus,
+  getZoomUserProfile, storeZoomUserConnection, zoomUserOAuthConfigured,
+} from '../services/zoomUserOAuth.js';
 
 export const authRouter = express.Router();
+
+const zoomCallbackUrl = (result) => {
+  const url = new URL(config.frontendUrl);
+  url.pathname = '/profile';
+  url.search = '';
+  url.searchParams.set('zoom', result);
+  return url.toString();
+};
+
+authRouter.post('/zoom/connect-url', authenticate, asyncHandler(async (req, res) => {
+  if (!zoomUserOAuthConfigured()) return fail(res, 503, 'Zoom user authorization is not configured. Contact the administrator.');
+  const state = randomBytes(32).toString('hex');
+  const stateHash = createHash('sha256').update(state).digest('hex');
+  await sql`DELETE FROM zoom_oauth_states WHERE expires_at <= NOW()`;
+  await sql`
+    INSERT INTO zoom_oauth_states (state_hash, user_id, expires_at)
+    VALUES (${stateHash}, ${req.user.id}, NOW() + INTERVAL '10 minutes')
+  `;
+  return res.json({ success: true, data: { authorizationUrl: createZoomOAuthAuthorizationUrl(state) } });
+}));
+
+authRouter.get('/zoom/status', authenticate, asyncHandler(async (req, res) => {
+  const status = await getZoomUserConnectionStatus(req.user.id);
+  return res.json({ success: true, data: { configured: zoomUserOAuthConfigured(), defaultAuthMode: config.zoom.participantAuthMode, ...status } });
+}));
+
+authRouter.delete('/zoom/connection', authenticate, asyncHandler(async (req, res) => {
+  await sql`DELETE FROM zoom_user_connections WHERE user_id = ${req.user.id}`;
+  return res.json({ success: true, data: { disconnected: true } });
+}));
+
+// Zoom redirects here without the Galaxy College bearer token; the one-time state binds the
+// authorization response to the local user who started the link flow.
+authRouter.get('/zoom/callback', asyncHandler(async (req, res) => {
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const stateHash = /^[0-9a-f]{64}$/i.test(state) ? createHash('sha256').update(state).digest('hex') : '';
+  const [savedState] = stateHash ? await sql`
+    DELETE FROM zoom_oauth_states WHERE state_hash = ${stateHash} AND expires_at > NOW()
+    RETURNING user_id
+  ` : [];
+  if (!savedState) return res.redirect(303, zoomCallbackUrl('invalid'));
+  if (req.query.error || typeof req.query.code !== 'string' || !req.query.code) {
+    return res.redirect(303, zoomCallbackUrl('denied'));
+  }
+
+  try {
+    const tokens = await exchangeZoomOAuthCode(req.query.code);
+    const profile = await getZoomUserProfile(tokens.access_token);
+    const zoomUserId = String(profile.id || profile.user_id || '');
+    if (!zoomUserId) throw new Error('Zoom did not return a user ID.');
+    await storeZoomUserConnection(savedState.user_id, zoomUserId, profile.email || null, tokens);
+    return res.redirect(303, zoomCallbackUrl('connected'));
+  } catch {
+    return res.redirect(303, zoomCallbackUrl('error'));
+  }
+}));
 
 const toUserDto = (u) => ({
   id: u.id,

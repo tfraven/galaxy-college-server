@@ -50,7 +50,15 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || '',
   // An empty list denies browser origins; native mobile requests do not use browser CORS.
   corsOrigins,
+  frontendUrl: (process.env.FRONTEND_URL || corsOrigins[0] || '').replace(/\/+$/, ''),
+  zoomUserOAuth: {
+    clientId: process.env.ZOOM_USER_OAUTH_CLIENT_ID || '',
+    clientSecret: process.env.ZOOM_USER_OAUTH_CLIENT_SECRET || '',
+    redirectUri: process.env.ZOOM_USER_OAUTH_REDIRECT_URI || '',
+    encryptionKey: process.env.ZOOM_USER_OAUTH_ENCRYPTION_KEY || '',
+  },
   zoom: {
+    participantAuthMode: process.env.ZOOM_PARTICIPANT_AUTH_MODE === 'obf' ? 'obf' : 'zak',
     accounts: {
       account1: {
         label: process.env.ZOOM_ACCOUNT_1_LABEL || 'Zoom account 1',

@@ -34,6 +34,7 @@
       var password = values.get('p') || '';
       var userName = values.get('n') || 'Galaxy College participant';
       var zak = values.get('z') || undefined;
+      var obfToken = values.get('o') || undefined;
       var isHost = values.get('h') === '1';
       var leftUrl = window.location.origin + window.location.pathname + '?left=1';
       function postClassroomEvent(name, messageText) {
@@ -58,7 +59,7 @@
         postClassroomEvent('left');
         return;
       }
-      if (!signature || !meetingNumber || (isHost && !zak)) {
+      if (!signature || !meetingNumber || (isHost && !zak) || (!isHost && !zak && !obfToken)) {
         message.textContent = 'Could not open this live class.';
         detail.textContent = 'The meeting details are missing or have expired. Return to the live classes page and join again.';
         postClassroomEvent('error', detail.textContent);
@@ -115,6 +116,7 @@
               passWord: password,
               userName: userName,
               zak: zak,
+              obfToken: obfToken,
               success: function () {
                 if (joinFinished) return;
                 joinFinished = true;

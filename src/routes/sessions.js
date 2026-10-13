@@ -1,5 +1,6 @@
 import express from 'express';
 import { sql } from '../db/connection.js';
+import { config } from '../config/index.js';
 import { asyncHandler, fail, isStaff, requireRole, ROLE, STAFF_ROLES, toInt } from '../middleware/auth.js';
 import { canManageClass, getStudentEnrolment } from '../services/access.js';
 import { notifyStudents } from '../services/notifications.js';
@@ -7,6 +8,7 @@ import {
   configuredZoomAccounts, createZoomMeeting, deleteZoomMeeting, generateMeetingSdkToken,
   sessionIdFromReference, sessionReferenceFor, updateZoomMeeting, zoomAccountConfigured,
 } from '../services/zoom.js';
+import { getZoomParticipantToken } from '../services/zoomUserOAuth.js';
 import { getPagination, paginationMeta } from '../middleware/pagination.js';
 import { runLiveSessionScheduler } from '../services/liveSessionScheduler.js';
 
@@ -625,15 +627,26 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
 
   if (!mayJoinNow(session)) return fail(res, 400, 'This class is outside its scheduled join time.');
   if (!session.zoom_meeting_id) return fail(res, 503, 'This live session does not have Zoom Meeting details yet.');
-  const { signature, zak, expiresAt } = await generateMeetingSdkToken({
+  const { signature, zak: hostZak, expiresAt } = await generateMeetingSdkToken({
     accountKey: session.zoom_account || 'account1',
     meetingNumber: session.zoom_meeting_id,
     isHost,
   });
+  const authMode = isHost ? 'zak' : (req.body?.authMode === 'obf' ? 'obf' : (req.body?.authMode === 'zak' ? 'zak' : config.zoom.participantAuthMode));
+  const participantToken = isHost ? hostZak : await getZoomParticipantToken({
+    userId: req.user.id,
+    meetingNumber: session.zoom_meeting_id,
+    type: authMode === 'obf' ? 'onbehalf' : 'zak',
+  });
 
   res.json({
     success: true,
-    data: { signature, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '', zak, userName: req.user.fullName, isHost, expiresAt },
+    data: {
+      signature, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '',
+      zak: authMode === 'zak' ? participantToken : undefined,
+      obfToken: authMode === 'obf' ? participantToken : undefined,
+      authMode, userName: req.user.fullName, isHost, expiresAt,
+    },
   });
 }));
 

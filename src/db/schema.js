@@ -17,6 +17,28 @@ export const initSchema = async () => {
   `;
 
   await sql`
+    CREATE TABLE IF NOT EXISTS zoom_user_connections (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      zoom_user_id TEXT NOT NULL,
+      zoom_email TEXT,
+      access_token_encrypted TEXT NOT NULL,
+      refresh_token_encrypted TEXT NOT NULL,
+      access_expires_at TIMESTAMPTZ NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS zoom_oauth_states (
+      state_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_zoom_oauth_states_expiry ON zoom_oauth_states (expires_at)`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS classes (
       id SERIAL PRIMARY KEY,
       level INTEGER NOT NULL, -- 1: 1st Year, 2: 2nd Year, 3: Entry
