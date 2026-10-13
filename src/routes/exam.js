@@ -163,34 +163,15 @@ examRouter.post('/submit', requireRole(ROLE.STUDENT), asyncHandler(async (req, r
 // RES-4: review. Owner (or staff of that course) only, only after submission, only when results are released.
 examRouter.get('/review/:attemptId', asyncHandler(async (req, res) => {
   const attemptId = toInt(req.params.attemptId);
-  const [row] = await sql`
-    SELECT a.id AS attempt_id, a.test_id, a.student_id, a.seed, a.score, a.percentage, a.grade,
-           a.correct_cnt, a.wrong_cnt, a.unanswered_cnt, a.started_at, a.deadline_at, a.submitted_at,
-           t.id AS "t_id", t.course_id, t.title, t.duration_min, t.mark_per_q, t.shuffle_q, t.shuffle_opt,
-           t.result_mode, t.results_released, t.status, t.start_at, t.end_at, t.grand_test_id,
-           s.name AS "subjectName", cl.name AS "className"
-    FROM attempts a
-    JOIN tests t ON a.test_id = t.id
-    JOIN courses c ON t.course_id = c.id
-    JOIN subjects s ON c.subject_id = s.id
-    JOIN classes cl ON c.class_id = cl.id
-    WHERE a.id = ${attemptId}
-  `;
-  if (!row) return fail(res, 404, 'Attempt not found');
+  const [attempt] = await sql`SELECT * FROM attempts WHERE id = ${attemptId}`;
+  if (!attempt) return fail(res, 404, 'Attempt not found');
 
-  const attempt = {
-    id: row.attempt_id, test_id: row.test_id, student_id: row.student_id, seed: row.seed,
-    score: row.score, percentage: row.percentage, grade: row.grade,
-    correct_cnt: row.correct_cnt, wrong_cnt: row.wrong_cnt, unanswered_cnt: row.unanswered_cnt,
-    started_at: row.started_at, deadline_at: row.deadline_at, submitted_at: row.submitted_at,
-  };
-  const test = {
-    id: row.t_id, course_id: row.course_id, title: row.title, duration_min: row.duration_min,
-    mark_per_q: row.mark_per_q, shuffle_q: row.shuffle_q, shuffle_opt: row.shuffle_opt,
-    result_mode: row.result_mode, results_released: row.results_released, status: row.status,
-    start_at: row.start_at, end_at: row.end_at, grand_test_id: row.grand_test_id,
-    subjectName: row.subjectName, className: row.className,
-  };
+  const [test] = await sql`
+    SELECT t.*, s.name AS "subjectName", cl.name AS "className"
+    FROM tests t JOIN courses c ON t.course_id = c.id JOIN subjects s ON c.subject_id = s.id JOIN classes cl ON c.class_id = cl.id
+    WHERE t.id = ${attempt.test_id}
+  `;
+  if (!test) return fail(res, 404, 'Test not found');
 
   const staff = STAFF_ROLES.includes(req.user.role);
   if (staff) {
