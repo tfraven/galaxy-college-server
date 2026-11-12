@@ -629,7 +629,7 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
 
   if (!mayJoinNow(session)) return fail(res, 400, 'This class is outside its scheduled join time.');
   if (!session.zoom_meeting_id) return fail(res, 503, 'This live session does not have Zoom Meeting details yet.');
-  const { signature, zak: hostZak, expiresAt } = await generateMeetingSdkToken({
+  const { signature, sdkJwt, zak: hostZak, expiresAt } = await generateMeetingSdkToken({
     accountKey: session.zoom_account || 'account1',
     meetingNumber: session.zoom_meeting_id,
     isHost,
@@ -653,7 +653,7 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      signature, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '',
+      signature, sdkJwt, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '',
       zak: authMode === 'zak' ? participantToken : undefined,
       obfToken: authMode === 'obf' ? participantToken : undefined,
       authMode, userName: req.user.fullName, isHost, expiresAt,

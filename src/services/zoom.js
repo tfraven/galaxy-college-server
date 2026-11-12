@@ -137,6 +137,12 @@ export const generateMeetingSdkToken = async ({ accountKey, meetingNumber, isHos
   }
   const iat = Math.floor(Date.now() / 1000) - 30;
   const exp = iat + 60 * 60 * 2;
+  const sdkJwt = jwt.sign({
+    appKey: account.sdkKey,
+    iat,
+    exp,
+    tokenExp: exp,
+  }, account.sdkSecret, { algorithm: 'HS256' });
   const signature = jwt.sign({
     appKey: account.sdkKey,
     mn: String(meetingNumber),
@@ -150,5 +156,5 @@ export const generateMeetingSdkToken = async ({ accountKey, meetingNumber, isHos
   const zak = isHost
     ? (await zoomApi(accountKey, account, `/users/${encodeURIComponent(account.userId)}/token?type=zak`)).token
     : undefined;
-  return { signature, zak, expiresAt: new Date(exp * 1000).toISOString() };
+  return { signature, sdkJwt, zak, expiresAt: new Date(exp * 1000).toISOString() };
 };
