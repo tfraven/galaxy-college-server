@@ -8,7 +8,7 @@ import { asyncHandler, authenticate, fail, ROLE, requireRole } from '../middlewa
 import { consumeLoginRateLimit } from '../services/loginRateLimit.js';
 import {
   createZoomOAuthAuthorizationUrl, exchangeZoomOAuthCode, getZoomUserConnectionStatus,
-  getZoomUserProfile, storeZoomUserConnection, zoomUserOAuthConfigured,
+  getZoomUserProfile, storeZoomUserConnection, zoomUserOAuthConfigured, zoomUserOAuthSetupStatus,
 } from '../services/zoomUserOAuth.js';
 
 export const authRouter = express.Router();
@@ -34,8 +34,9 @@ authRouter.post('/zoom/connect-url', authenticate, asyncHandler(async (req, res)
 }));
 
 authRouter.get('/zoom/status', authenticate, asyncHandler(async (req, res) => {
-  const status = await getZoomUserConnectionStatus(req.user.id);
-  return res.json({ success: true, data: { configured: zoomUserOAuthConfigured(), defaultAuthMode: config.zoom.participantAuthMode, ...status } });
+  const connection = await getZoomUserConnectionStatus(req.user.id);
+  const setup = zoomUserOAuthSetupStatus();
+  return res.json({ success: true, data: { ...setup, defaultAuthMode: config.zoom.participantAuthMode, ...connection } });
 }));
 
 authRouter.delete('/zoom/connection', authenticate, asyncHandler(async (req, res) => {

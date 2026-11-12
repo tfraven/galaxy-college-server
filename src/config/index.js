@@ -52,8 +52,8 @@ export const config = {
   corsOrigins,
   frontendUrl: (process.env.FRONTEND_URL || corsOrigins[0] || '').replace(/\/+$/, ''),
   zoomUserOAuth: {
-    clientId: process.env.ZOOM_USER_OAUTH_CLIENT_ID || '',
-    clientSecret: process.env.ZOOM_USER_OAUTH_CLIENT_SECRET || '',
+    clientId: process.env.ZOOM_USER_OAUTH_CLIENT_ID || process.env.ZOOM_ACCOUNT_1_SDK_KEY || process.env.ZOOM_SDK_KEY || '',
+    clientSecret: process.env.ZOOM_USER_OAUTH_CLIENT_SECRET || process.env.ZOOM_ACCOUNT_1_SDK_SECRET || process.env.ZOOM_SDK_SECRET || '',
     redirectUri: process.env.ZOOM_USER_OAUTH_REDIRECT_URI || '',
     encryptionKey: process.env.ZOOM_USER_OAUTH_ENCRYPTION_KEY || '',
   },

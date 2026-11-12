@@ -6,15 +6,24 @@ const refreshJobs = new Map();
 
 const oauthConfig = () => config.zoomUserOAuth;
 
-export const zoomUserOAuthConfigured = () => {
+export const zoomUserOAuthSetupStatus = () => {
   const oauth = oauthConfig();
   let frontendIsOrigin = false;
   try {
     const frontend = new URL(config.frontendUrl);
     frontendIsOrigin = ['http:', 'https:'].includes(frontend.protocol) && frontend.origin === config.frontendUrl;
   } catch {}
-  return Boolean(oauth.clientId && oauth.clientSecret && oauth.redirectUri && frontendIsOrigin && /^[0-9a-f]{64}$/i.test(oauth.encryptionKey));
+
+  const issues = [];
+  if (!oauth.clientId) issues.push('OAuth Client ID or Meeting SDK General-app Client ID');
+  if (!oauth.clientSecret) issues.push('OAuth Client Secret or Meeting SDK General-app Client Secret');
+  if (!oauth.redirectUri) issues.push('ZOOM_USER_OAUTH_REDIRECT_URI');
+  if (!frontendIsOrigin) issues.push('FRONTEND_URL must be the website origin without a path');
+  if (!/^[0-9a-f]{64}$/i.test(oauth.encryptionKey)) issues.push('ZOOM_USER_OAUTH_ENCRYPTION_KEY must be 64 hex characters');
+  return { configured: issues.length === 0, configurationIssues: issues };
 };
+
+export const zoomUserOAuthConfigured = () => zoomUserOAuthSetupStatus().configured;
 
 const requireOAuthConfig = () => {
   if (!zoomUserOAuthConfigured()) {
