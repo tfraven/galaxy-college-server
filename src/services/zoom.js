@@ -120,6 +120,15 @@ export const deleteZoomMeeting = async (key, meetingId) => {
   await zoomApi(key, account, `/meetings/${encodeURIComponent(meetingId)}`, { method: 'DELETE' });
 };
 
+// start_url carries a host token. Return it only to the class host so the Zoom app
+// starts the meeting instead of leaving them on Zoom's signed-in home page.
+export const getZoomHostStartUrl = async (key, meetingId) => {
+  const account = getAccount(key);
+  if (!account || !meetingId) return '';
+  const meeting = await zoomApi(key, account, `/meetings/${encodeURIComponent(meetingId)}`);
+  return typeof meeting.start_url === 'string' ? meeting.start_url : '';
+};
+
 export const generateMeetingSdkToken = async ({ accountKey, meetingNumber, isHost }) => {
   const account = getAccount(accountKey);
   if (!account || !meetingNumber) {

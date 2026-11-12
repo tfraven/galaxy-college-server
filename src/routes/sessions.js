@@ -5,7 +5,7 @@ import { asyncHandler, fail, isStaff, requireRole, ROLE, STAFF_ROLES, toInt } fr
 import { canManageClass, getStudentEnrolment } from '../services/access.js';
 import { notifyStudents } from '../services/notifications.js';
 import {
-  configuredZoomAccounts, createZoomMeeting, deleteZoomMeeting, generateMeetingSdkToken,
+  configuredZoomAccounts, createZoomMeeting, deleteZoomMeeting, generateMeetingSdkToken, getZoomHostStartUrl,
   sessionIdFromReference, sessionReferenceFor, updateZoomMeeting, zoomAccountConfigured,
 } from '../services/zoom.js';
 import { getZoomParticipantToken } from '../services/zoomUserOAuth.js';
@@ -648,13 +648,36 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
         type: authMode === 'obf' ? 'onbehalf' : 'zak',
       });
 
+  let launchUrl = session.zoom_join_url || '';
+  if (!launchUrl) {
+    const params = new URLSearchParams();
+    if (session.zoom_passcode) params.set('pwd', session.zoom_passcode);
+    launchUrl = `https://zoom.us/j/${encodeURIComponent(session.zoom_meeting_id)}?${params.toString()}`;
+  }
+  if (isHost) {
+    try {
+      const startUrl = await getZoomHostStartUrl(session.zoom_account || 'account1', session.zoom_meeting_id);
+      if (startUrl) launchUrl = startUrl;
+    } catch {
+      // The participant join link still opens the meeting if the host link cannot be refreshed.
+    }
+  } else {
+    try {
+      const url = new URL(launchUrl);
+      if (req.user.fullName) url.searchParams.set('uname', String(req.user.fullName).slice(0, 64));
+      launchUrl = url.toString();
+    } catch {
+      // Keep the stored join link when it is not a valid URL.
+    }
+  }
+
   res.json({
     success: true,
     data: {
       signature, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '',
       zak: authMode === 'zak' ? participantToken : undefined,
       obfToken: authMode === 'obf' ? participantToken : undefined,
-      authMode, userName: req.user.fullName, isHost, expiresAt,
+      launchUrl, authMode, userName: req.user.fullName, isHost, expiresAt,
     },
   });
 }));
