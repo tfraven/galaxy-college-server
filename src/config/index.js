@@ -58,7 +58,11 @@ export const config = {
     encryptionKey: process.env.ZOOM_USER_OAUTH_ENCRYPTION_KEY || '',
   },
   zoom: {
-    participantAuthMode: process.env.ZOOM_PARTICIPANT_AUTH_MODE === 'obf' ? 'obf' : 'zak',
+    // guest: students join the school's licensed Zoom meeting with a Meeting SDK signature.
+    // zak/obf: optional, only when a participant has linked their own Zoom user.
+    participantAuthMode: ['zak', 'obf', 'guest'].includes(process.env.ZOOM_PARTICIPANT_AUTH_MODE)
+      ? process.env.ZOOM_PARTICIPANT_AUTH_MODE
+      : 'guest',
     accounts: {
       account1: {
         label: process.env.ZOOM_ACCOUNT_1_LABEL || 'Zoom account 1',
@@ -66,8 +70,10 @@ export const config = {
         userId: process.env.ZOOM_ACCOUNT_1_USER_ID || '',
         clientId: process.env.ZOOM_ACCOUNT_1_CLIENT_ID || '',
         clientSecret: process.env.ZOOM_ACCOUNT_1_CLIENT_SECRET || '',
-        sdkKey: process.env.ZOOM_ACCOUNT_1_SDK_KEY || '',
-        sdkSecret: process.env.ZOOM_ACCOUNT_1_SDK_SECRET || '',
+        // ZOOM_SDK_KEY / ZOOM_SDK_SECRET are the Meeting SDK Client ID / Client Secret
+        // already stored for the paid Zoom Meetings account. They are not Video SDK keys.
+        sdkKey: process.env.ZOOM_ACCOUNT_1_SDK_KEY || process.env.ZOOM_SDK_KEY || '',
+        sdkSecret: process.env.ZOOM_ACCOUNT_1_SDK_SECRET || process.env.ZOOM_SDK_SECRET || '',
       },
       account2: {
         label: process.env.ZOOM_ACCOUNT_2_LABEL || 'Zoom account 2',

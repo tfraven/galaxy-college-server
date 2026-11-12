@@ -59,7 +59,7 @@
         postClassroomEvent('left');
         return;
       }
-      if (!signature || !meetingNumber || (isHost && !zak) || (!isHost && !zak && !obfToken)) {
+      if (!signature || !meetingNumber || (isHost && !zak)) {
         message.textContent = 'Could not open this live class.';
         detail.textContent = 'The meeting details are missing or have expired. Return to the live classes page and join again.';
         postClassroomEvent('error', detail.textContent);

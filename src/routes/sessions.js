@@ -632,12 +632,21 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
     meetingNumber: session.zoom_meeting_id,
     isHost,
   });
-  const authMode = isHost ? 'zak' : (req.body?.authMode === 'obf' ? 'obf' : (req.body?.authMode === 'zak' ? 'zak' : config.zoom.participantAuthMode));
-  const participantToken = isHost ? hostZak : await getZoomParticipantToken({
-    userId: req.user.id,
-    meetingNumber: session.zoom_meeting_id,
-    type: authMode === 'obf' ? 'onbehalf' : 'zak',
-  });
+  const requestedMode = ['zak', 'obf', 'guest'].includes(req.body?.authMode)
+    ? req.body.authMode
+    : config.zoom.participantAuthMode;
+  // Hosts always start the meeting as the licensed Zoom user on the school's subscription.
+  // Participants join that same meeting unless they explicitly chose their own Zoom user.
+  const authMode = isHost ? 'zak' : requestedMode;
+  const participantToken = isHost
+    ? hostZak
+    : authMode === 'guest'
+      ? undefined
+      : await getZoomParticipantToken({
+        userId: req.user.id,
+        meetingNumber: session.zoom_meeting_id,
+        type: authMode === 'obf' ? 'onbehalf' : 'zak',
+      });
 
   res.json({
     success: true,
