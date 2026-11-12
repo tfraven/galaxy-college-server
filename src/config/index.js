@@ -51,18 +51,7 @@ export const config = {
   // An empty list denies browser origins; native mobile requests do not use browser CORS.
   corsOrigins,
   frontendUrl: (process.env.FRONTEND_URL || corsOrigins[0] || '').replace(/\/+$/, ''),
-  zoomUserOAuth: {
-    clientId: process.env.ZOOM_USER_OAUTH_CLIENT_ID || process.env.ZOOM_ACCOUNT_1_SDK_KEY || process.env.ZOOM_SDK_KEY || '',
-    clientSecret: process.env.ZOOM_USER_OAUTH_CLIENT_SECRET || process.env.ZOOM_ACCOUNT_1_SDK_SECRET || process.env.ZOOM_SDK_SECRET || '',
-    redirectUri: process.env.ZOOM_USER_OAUTH_REDIRECT_URI || '',
-    encryptionKey: process.env.ZOOM_USER_OAUTH_ENCRYPTION_KEY || '',
-  },
   zoom: {
-    // guest: students join the school's licensed Zoom meeting with a Meeting SDK signature.
-    // zak/obf: optional, only when a participant has linked their own Zoom user.
-    participantAuthMode: ['zak', 'obf', 'guest'].includes(process.env.ZOOM_PARTICIPANT_AUTH_MODE)
-      ? process.env.ZOOM_PARTICIPANT_AUTH_MODE
-      : 'guest',
     accounts: {
       account1: {
         label: process.env.ZOOM_ACCOUNT_1_LABEL || 'Zoom account 1',
