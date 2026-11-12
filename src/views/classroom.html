@@ -50,10 +50,11 @@
       var zak = values.get('z') || undefined;
       var obfToken = values.get('o') || undefined;
       var isHost = values.get('h') === '1';
-      var isStudent = !isHost;
+      var requestedMode = values.get('r');
+      var isStudent = !isHost && requestedMode !== 'participant';
       if (isStudent) {
         document.documentElement.classList.add('student-mode');
-        detail.textContent = 'Camera is disabled. Your microphone stays muted; use chat to message your teacher.';
+        detail.textContent = 'Camera and microphone are disabled. Use chat to message your teacher.';
       }
       var leftUrl = window.location.origin + window.location.pathname + '?left=1';
       function postClassroomEvent(name, messageText) {
@@ -180,7 +181,7 @@
                 if (isStudent) {
                   window.ZoomMtg.showMeetingHeader({ show: false });
                   var hideStudentControls = function () {
-                    var blocked = /\b(mute|unmute|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i;
+                    var blocked = /\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i;
                     document.querySelectorAll('button,[role="button"]').forEach(function (control) {
                       var label = [
                         control.getAttribute('aria-label'),
@@ -188,7 +189,7 @@
                         control.getAttribute('data-tooltip'),
                         control.innerText
                       ].filter(Boolean).join(' ').trim();
-                      if (!label || /\bchat\b/i.test(label) || /\bleave\b/i.test(label) || /\bjoin audio\b/i.test(label)) return;
+                      if (!label || /\bchat\b/i.test(label) || /\bleave\b/i.test(label)) return;
                       if (blocked.test(label)) control.style.setProperty('display', 'none', 'important');
                     });
                   };
