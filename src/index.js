@@ -57,7 +57,7 @@ const classroomCsp = [
   // The Meeting SDK uses blob: workers and media modules for browser media processing.
   `script-src 'self' blob: ${inlineHashes('script').join(
     ' '
-  )} 'wasm-unsafe-eval' https://source.zoom.us https://*.zoom.us`,
+  )} 'wasm-unsafe-eval' https://source.zoom.us https://*.zoom.us https://dmogdx0jrul3u.cloudfront.net`,
 
   "style-src 'self' 'unsafe-inline' https://source.zoom.us https://*.zoom.us",
 
