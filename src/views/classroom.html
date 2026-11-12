@@ -10,10 +10,24 @@
     #status{position:fixed;z-index:10000;top:12px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 32px));display:grid;place-items:center;text-align:center;padding:12px 16px;box-sizing:border-box;background:rgba(11,18,32,.94);border:1px solid #334155;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.35);pointer-events:none}
     #status>div{max-width:520px}#detail{color:#94a3b8;line-height:1.5;margin-top:9px}
     #zmmtg-root{display:block;min-height:100vh}
+    html.student-mode button[aria-label*="mute" i],html.student-mode button[title*="mute" i],
+    html.student-mode button[aria-label*="microphone" i],html.student-mode button[title*="microphone" i],
+    html.student-mode button[aria-label*="start video" i],html.student-mode button[aria-label*="stop video" i],
+    html.student-mode button[aria-label*="camera" i],html.student-mode button[title*="camera" i],
+    html.student-mode button[aria-label*="share screen" i],html.student-mode button[title*="share screen" i],
+    html.student-mode button[aria-label*="participant" i],html.student-mode button[title*="participant" i],
+    html.student-mode button[aria-label*="invite" i],html.student-mode button[title*="invite" i],
+    html.student-mode button[aria-label*="record" i],html.student-mode button[title*="record" i],
+    html.student-mode button[aria-label*="reaction" i],html.student-mode button[title*="reaction" i],
+    html.student-mode button[aria-label*="poll" i],html.student-mode button[title*="poll" i],
+    html.student-mode button[aria-label*="breakout" i],html.student-mode button[title*="breakout" i],
+    html.student-mode button[aria-label*="caption" i],html.student-mode button[title*="caption" i],
+    html.student-mode button[aria-label*="whiteboard" i],html.student-mode button[title*="whiteboard" i],
+    html.student-mode button[aria-label="More" i],html.student-mode button[title="More" i] { display:none !important }
   </style>
 </head>
 <body>
-  <div id="status"><div><strong id="message">Connecting to the Zoom meeting…</strong><div id="detail">Please allow camera and microphone access when your browser asks.</div></div></div>
+  <div id="status"><div><strong id="message">Connecting to the Zoom meeting…</strong><div id="detail">Joining your scheduled live class. Please wait.</div></div></div>
   <div id="zmmtg-root"></div>
   <div id="aria-notify-area"></div>
   <script src="https://source.zoom.us/6.5.0/lib/vendor/react.min.js"></script>
@@ -36,6 +50,11 @@
       var zak = values.get('z') || undefined;
       var obfToken = values.get('o') || undefined;
       var isHost = values.get('h') === '1';
+      var isStudent = !isHost;
+      if (isStudent) {
+        document.documentElement.classList.add('student-mode');
+        detail.textContent = 'Camera is disabled. Your microphone stays muted; use chat to message your teacher.';
+      }
       var leftUrl = window.location.origin + window.location.pathname + '?left=1';
       function postClassroomEvent(name, messageText) {
         var payload = { type: 'galaxy-classroom-' + name };
@@ -81,6 +100,20 @@
         patchJsMedia: true,
         disableInvite: true,
         disableRecord: true,
+        disableCallOut: isStudent,
+        disableZoomPhone: isStudent,
+        disableReport: isStudent,
+        disablePreview: true,
+        showMeetingHeader: !isStudent,
+        meetingInfo: isStudent ? ['topic'] : ['topic', 'host', 'participant'],
+        isSupportAV: true,
+        isSupportChat: true,
+        isSupportQA: !isStudent,
+        isSupportPolling: !isStudent,
+        isSupportBreakout: !isStudent,
+        isSupportCC: !isStudent,
+        isSupportNonverbal: !isStudent,
+        screenShare: !isStudent,
         success: function () {
           message.textContent = 'Joining the Zoom meeting…';
           detail.textContent = 'Waiting for Zoom to connect you to the class.';
@@ -144,6 +177,30 @@
                 document.getElementById('zmmtg-root').style.display = 'block';
                 window.ZoomMtg.showInviteFunction({ show: false });
                 window.ZoomMtg.showRecordFunction({ show: false });
+                if (isStudent) {
+                  window.ZoomMtg.showMeetingHeader({ show: false });
+                  var hideStudentControls = function () {
+                    var blocked = /\b(mute|unmute|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i;
+                    document.querySelectorAll('button,[role="button"]').forEach(function (control) {
+                      var label = [
+                        control.getAttribute('aria-label'),
+                        control.getAttribute('title'),
+                        control.getAttribute('data-tooltip'),
+                        control.innerText
+                      ].filter(Boolean).join(' ').trim();
+                      if (!label || /\bchat\b/i.test(label) || /\bleave\b/i.test(label) || /\bjoin audio\b/i.test(label)) return;
+                      if (blocked.test(label)) control.style.setProperty('display', 'none', 'important');
+                    });
+                  };
+                  hideStudentControls();
+                  var studentControlsObserver = new MutationObserver(hideStudentControls);
+                  studentControlsObserver.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['aria-label', 'title', 'data-tooltip']
+                  });
+                }
                 postClassroomEvent('joined');
               },
               error: handleJoinError,

@@ -340,7 +340,7 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
                                zoom_account, zoom_meeting_id, zoom_passcode, zoom_policy_version)
     VALUES (${classId}, ${sectionId || null}, ${courseName || 'General'}, ${title.trim()}, ${finalHost},
             ${start.toISOString()}, ${end.toISOString()}, 1, ${req.user.id}, ${Boolean(videoEnabled)}, ${zoomAccount},
-            ${zoomMeeting?.meetingId || null}, ${zoomMeeting?.passcode || null}, ${zoomMeeting ? 1 : 0})
+            ${zoomMeeting?.meetingId || null}, ${zoomMeeting?.passcode || null}, ${zoomMeeting ? 2 : 0})
     RETURNING id
   `;
   await setSessionVideoParticipants(id, videoEnabled ? videoParticipantIds : [], req.user.id);
@@ -564,7 +564,7 @@ sessionsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res
   await sql`
     UPDATE live_sessions SET title = ${title}, course_name = ${courseName}, plan_start = ${start.toISOString()}, plan_end = ${end.toISOString()},
       video_enabled = ${videoEnabled}, zoom_account = ${zoomAccount}, zoom_meeting_id = ${meeting?.meetingId || null},
-      zoom_passcode = ${meeting?.passcode || null}, zoom_policy_version = ${videoEnabled && meeting ? 1 : 0}
+      zoom_passcode = ${meeting?.passcode || null}, zoom_policy_version = ${videoEnabled && meeting ? 2 : 0}
     WHERE id = ${id}
   `;
   await setSessionVideoParticipants(id, videoEnabled ? participantIds : [], req.user.id);
