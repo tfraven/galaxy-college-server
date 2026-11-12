@@ -13,11 +13,12 @@ import {
 
 export const authRouter = express.Router();
 
-const zoomCallbackUrl = (result) => {
+const zoomCallbackUrl = (result, reason = '') => {
   const url = new URL(config.frontendUrl);
   url.pathname = '/profile';
   url.search = '';
   url.searchParams.set('zoom', result);
+  if (reason) url.searchParams.set('reason', reason);
   return url.toString();
 };
 
@@ -59,15 +60,30 @@ authRouter.get('/zoom/callback', asyncHandler(async (req, res) => {
     return res.redirect(303, zoomCallbackUrl('denied'));
   }
 
+  let stage = 'token_exchange';
   try {
     const tokens = await exchangeZoomOAuthCode(req.query.code);
+    stage = 'profile_lookup';
     const profile = await getZoomUserProfile(tokens.access_token);
     const zoomUserId = String(profile.id || profile.user_id || '');
     if (!zoomUserId) throw new Error('Zoom did not return a user ID.');
+    stage = 'connection_save';
     await storeZoomUserConnection(savedState.user_id, zoomUserId, profile.email || null, tokens);
     return res.redirect(303, zoomCallbackUrl('connected'));
-  } catch {
-    return res.redirect(303, zoomCallbackUrl('error'));
+  } catch (error) {
+    const rawCode = String(error?.zoom?.code || '');
+    const safeCode = /^[a-z0-9_-]{1,48}$/i.test(rawCode) ? rawCode : '';
+    const reason = stage === 'token_exchange'
+      ? (safeCode === 'invalid_client' ? 'invalid_client' : safeCode === 'invalid_grant' ? 'invalid_grant' : 'token_exchange_failed')
+      : stage === 'profile_lookup'
+        ? (error?.zoom?.status === 401 || error?.zoom?.status === 403 ? 'profile_scope_missing' : 'profile_lookup_failed')
+        : 'connection_save_failed';
+    console.error('[zoom-oauth] callback failed', {
+      stage,
+      upstreamStatus: Number.isInteger(error?.zoom?.status) ? error.zoom.status : null,
+      upstreamCode: safeCode || null,
+    });
+    return res.redirect(303, zoomCallbackUrl('error', reason));
   }
 }));
 
