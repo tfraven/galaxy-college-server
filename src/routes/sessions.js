@@ -5,7 +5,7 @@ import { asyncHandler, fail, isStaff, requireRole, ROLE, STAFF_ROLES, toInt } fr
 import { canManageClass, getStudentEnrolment } from '../services/access.js';
 import { notifyStudents } from '../services/notifications.js';
 import {
-  configuredZoomAccounts, createZoomMeeting, deleteZoomMeeting, generateMeetingSdkToken, getZoomHostStartUrl,
+  configuredZoomAccounts, createZoomMeeting, deleteZoomMeeting, generateMeetingSdkToken,
   sessionIdFromReference, sessionReferenceFor, updateZoomMeeting, zoomAccountConfigured,
 } from '../services/zoom.js';
 import { getZoomParticipantToken } from '../services/zoomUserOAuth.js';
@@ -102,6 +102,23 @@ const setSessionVideoParticipants = async (sessionId, userIds, createdBy) => {
       ON CONFLICT DO NOTHING
     `] : []),
   ]);
+};
+
+const deleteUpcomingRecurringSessions = async (scheduleId) => {
+  const scheduled = await sql`
+    SELECT id FROM live_sessions
+    WHERE recurring_schedule_id = ${scheduleId} AND status = 1 AND plan_start > NOW()
+  `;
+  if (!scheduled.length) return;
+  const removed = await sql`
+    DELETE FROM live_sessions
+    WHERE id = ANY(${scheduled.map(({ id }) => id)}::int[]) AND status = 1 AND plan_start > NOW()
+    RETURNING id, zoom_account, zoom_meeting_id
+  `;
+  if (!removed.length) return;
+  await sql`DELETE FROM notifications WHERE related_type = 'live_session' AND related_id = ANY(${removed.map(({ id }) => id)}::int[])`;
+  await Promise.allSettled(removed.map(({ zoom_account, zoom_meeting_id }) =>
+    deleteZoomMeeting(zoom_account || 'account1', zoom_meeting_id)));
 };
 
 const normalizeWeeklySlots = (slots) => {
@@ -320,10 +337,10 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
 
   const [{ id }] = await sql`
     INSERT INTO live_sessions (class_id, section_id, course_name, title, host_id, plan_start, plan_end, status, created_by, video_enabled,
-                               zoom_account, zoom_meeting_id, zoom_passcode, zoom_join_url)
+                               zoom_account, zoom_meeting_id, zoom_passcode, zoom_policy_version)
     VALUES (${classId}, ${sectionId || null}, ${courseName || 'General'}, ${title.trim()}, ${finalHost},
             ${start.toISOString()}, ${end.toISOString()}, 1, ${req.user.id}, ${Boolean(videoEnabled)}, ${zoomAccount},
-            ${zoomMeeting?.meetingId || null}, ${zoomMeeting?.passcode || null}, ${zoomMeeting?.joinUrl || null})
+            ${zoomMeeting?.meetingId || null}, ${zoomMeeting?.passcode || null}, ${zoomMeeting ? 1 : 0})
     RETURNING id
   `;
   await setSessionVideoParticipants(id, videoEnabled ? videoParticipantIds : [], req.user.id);
@@ -437,12 +454,7 @@ sessionsRouter.put('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asy
       `] : []),
     ]);
   }
-  await sql`
-    DELETE FROM notifications WHERE related_type = 'live_session' AND related_id IN (
-      SELECT id FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()
-    )
-  `;
-  await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
+  await deleteUpcomingRecurringSessions(id);
   const [details] = await sql`
     SELECT r.*, c.name AS classname, sec.name AS sectionname, u.full_name AS hostname,
            ARRAY(SELECT rvp.user_id FROM recurring_video_participants rvp WHERE rvp.schedule_id = r.id ORDER BY rvp.user_id) AS video_participant_ids
@@ -459,12 +471,7 @@ sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPER
   const [row] = await sql`UPDATE recurring_live_schedules SET enabled = ${req.body.enabled}, updated_at = NOW() WHERE id = ${id} AND deleted_at IS NULL RETURNING id, enabled`;
   if (!row) return fail(res, 404, 'Recurring schedule not found.');
   if (!row.enabled) {
-    await sql`
-      DELETE FROM notifications WHERE related_type = 'live_session' AND related_id IN (
-        SELECT id FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()
-      )
-    `;
-    await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
+    await deleteUpcomingRecurringSessions(id);
     await sql`UPDATE live_sessions SET status = 3, ended_at = NOW() WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start <= NOW()`;
   }
   res.json({ success: true, data: row });
@@ -473,15 +480,10 @@ sessionsRouter.patch('/recurring/:id/enabled', requireRole(ROLE.ADMIN, ROLE.OPER
 sessionsRouter.delete('/recurring/:id', requireRole(ROLE.ADMIN, ROLE.OPERATOR), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return fail(res, 400, 'Invalid recurring schedule id.');
-  await sql`
-    DELETE FROM notifications WHERE related_type = 'live_session' AND related_id IN (
-      SELECT id FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()
-    )
-  `;
-  await sql`DELETE FROM live_sessions WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start > NOW()`;
-  await sql`UPDATE live_sessions SET status = 3, ended_at = NOW() WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start <= NOW()`;
   const [deleted] = await sql`UPDATE recurring_live_schedules SET enabled = FALSE, deleted_at = NOW(), updated_at = NOW() WHERE id = ${id} AND deleted_at IS NULL RETURNING id`;
   if (!deleted) return fail(res, 404, 'Recurring schedule not found.');
+  await deleteUpcomingRecurringSessions(id);
+  await sql`UPDATE live_sessions SET status = 3, ended_at = NOW() WHERE recurring_schedule_id = ${id} AND status = 1 AND plan_start <= NOW()`;
   res.json({ success: true, data: { id: deleted.id, deleted: true } });
 }));
 
@@ -550,7 +552,7 @@ sessionsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res
     if (videoEnabled) {
       if (old.zoom_meeting_id && (old.zoom_account || 'account1') === zoomAccount) {
         await updateZoomMeeting(zoomAccount, old.zoom_meeting_id, { title, planStart: start, planEnd: end });
-        meeting = { meetingId: old.zoom_meeting_id, passcode: old.zoom_passcode || '', joinUrl: old.zoom_join_url || '' };
+        meeting = { meetingId: old.zoom_meeting_id, passcode: old.zoom_passcode || '' };
       } else {
         meeting = await createZoomMeeting(zoomAccount, { title, planStart: start, planEnd: end });
       }
@@ -562,7 +564,7 @@ sessionsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res
   await sql`
     UPDATE live_sessions SET title = ${title}, course_name = ${courseName}, plan_start = ${start.toISOString()}, plan_end = ${end.toISOString()},
       video_enabled = ${videoEnabled}, zoom_account = ${zoomAccount}, zoom_meeting_id = ${meeting?.meetingId || null},
-      zoom_passcode = ${meeting?.passcode || null}, zoom_join_url = ${meeting?.joinUrl || null}
+      zoom_passcode = ${meeting?.passcode || null}, zoom_policy_version = ${videoEnabled && meeting ? 1 : 0}
     WHERE id = ${id}
   `;
   await setSessionVideoParticipants(id, videoEnabled ? participantIds : [], req.user.id);
@@ -648,36 +650,13 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
         type: authMode === 'obf' ? 'onbehalf' : 'zak',
       });
 
-  let launchUrl = session.zoom_join_url || '';
-  if (!launchUrl) {
-    const params = new URLSearchParams();
-    if (session.zoom_passcode) params.set('pwd', session.zoom_passcode);
-    launchUrl = `https://zoom.us/j/${encodeURIComponent(session.zoom_meeting_id)}?${params.toString()}`;
-  }
-  if (isHost) {
-    try {
-      const startUrl = await getZoomHostStartUrl(session.zoom_account || 'account1', session.zoom_meeting_id);
-      if (startUrl) launchUrl = startUrl;
-    } catch {
-      // The participant join link still opens the meeting if the host link cannot be refreshed.
-    }
-  } else {
-    try {
-      const url = new URL(launchUrl);
-      if (req.user.fullName) url.searchParams.set('uname', String(req.user.fullName).slice(0, 64));
-      launchUrl = url.toString();
-    } catch {
-      // Keep the stored join link when it is not a valid URL.
-    }
-  }
-
   res.json({
     success: true,
     data: {
       signature, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '',
       zak: authMode === 'zak' ? participantToken : undefined,
       obfToken: authMode === 'obf' ? participantToken : undefined,
-      launchUrl, authMode, userName: req.user.fullName, isHost, expiresAt,
+      authMode, userName: req.user.fullName, isHost, expiresAt,
     },
   });
 }));

@@ -1,6 +1,6 @@
 import { sql } from '../db/connection.js';
 import { notifyStudents } from './notifications.js';
-import { createZoomMeeting, deleteZoomMeeting } from './zoom.js';
+import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from './zoom.js';
 
 const localDateParts = (date, timeZone) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -42,6 +42,31 @@ const weekdayFor = ({ year, month, day }) => new Date(Date.UTC(year, month - 1, 
  * Called on session-list reads and by the optional authenticated platform cron endpoint.
  */
 export const runLiveSessionScheduler = async (now = new Date()) => {
+  // Existing sessions predate the explicit recording/authentication policy.
+  // Patch each once so account defaults cannot silently re-enable those features.
+  const sessionsNeedingPolicy = await sql`
+    SELECT id, title, plan_start, plan_end, zoom_account, zoom_meeting_id
+    FROM live_sessions
+    WHERE zoom_meeting_id IS NOT NULL AND zoom_policy_version < 1
+      AND status IN (1, 2) AND plan_end > ${now.toISOString()} AND deleted_at IS NULL
+    ORDER BY id LIMIT 100
+  `;
+  for (const session of sessionsNeedingPolicy) {
+    try {
+      await updateZoomMeeting(session.zoom_account || 'account1', session.zoom_meeting_id, {
+        title: session.title,
+        planStart: session.plan_start,
+        planEnd: session.plan_end,
+      });
+      await sql`UPDATE live_sessions SET zoom_policy_version = 1 WHERE id = ${session.id} AND zoom_policy_version < 1`;
+    } catch (error) {
+      console.warn('[live-scheduler] could not apply Zoom meeting policy', {
+        sessionId: session.id,
+        message: String(error?.message || error).slice(0, 160),
+      });
+    }
+  }
+
   const schedules = await sql`
     SELECT r.id, r.class_id, r.section_id, r.course_name, r.title, r.host_id, r.timezone, r.weekly_slots,
            r.zoom_account,
@@ -122,16 +147,21 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
       INSERT INTO live_sessions (
         class_id, section_id, course_name, title, host_id, plan_start, plan_end,
         status, created_by, recurring_schedule_id, recurrence_key, video_enabled,
-        zoom_account, zoom_meeting_id, zoom_passcode, zoom_join_url
+        zoom_account, zoom_meeting_id, zoom_passcode, zoom_policy_version
       )
       SELECT class_id, section_id, course_name, title, host_id, ${occurrence.start.toISOString()}, ${occurrence.end.toISOString()},
              1, created_by, id, ${occurrence.key}, TRUE, ${schedule.zoom_account || 'account1'},
-             ${meeting.meetingId}, ${meeting.passcode}, ${meeting.joinUrl}
+             ${meeting.meetingId}, ${meeting.passcode}, 1
       FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE AND deleted_at IS NULL
       ON CONFLICT (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL DO NOTHING
       RETURNING id, class_id, section_id, course_name, title, plan_start
     `;
-    if (!session) continue;
+    if (!session) {
+      // A concurrent materializer may have claimed the recurrence key after this
+      // meeting was created. Remove the unreferenced Zoom meeting instead of leaving it behind.
+      await deleteZoomMeeting(schedule.zoom_account || 'account1', meeting.meetingId).catch(() => {});
+      continue;
+    }
     const allowedIds = Array.isArray(schedule.video_participant_ids) ? schedule.video_participant_ids : [];
     if (allowedIds.length) {
       await sql`

@@ -79,6 +79,8 @@
       window.ZoomMtg.init({
         leaveUrl: leftUrl,
         patchJsMedia: true,
+        disableInvite: true,
+        disableRecord: true,
         success: function () {
           message.textContent = 'Joining the Zoom meeting…';
           detail.textContent = 'Waiting for Zoom to connect you to the class.';
@@ -106,6 +108,8 @@
             message.textContent = 'Could not join the Zoom meeting.';
             detail.textContent = errorCode === 4011
               ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app. Create a General app with Meeting SDK turned on while signed in as the same Zoom user who hosts the class, put that app’s Client ID and Client Secret in ZOOM_SDK_KEY and ZOOM_SDK_SECRET, then create the class again. The Server-to-Server app is only activated, not published.'
+              : (errorCode === 3051 || errorCode === 3052)
+                ? 'Zoom is requiring an account sign-in for this meeting. The meeting should use its passcode and waiting room instead; ask the Zoom account admin to turn off “Only authenticated users can join meetings” for this host account, then recreate the session.'
               : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
             console.error('[classroom] Zoom join failed', {
               errorCode: errorCode || undefined,
@@ -138,6 +142,8 @@
                 window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
                 status.style.display = 'none';
                 document.getElementById('zmmtg-root').style.display = 'block';
+                window.ZoomMtg.showInviteFunction({ show: false });
+                window.ZoomMtg.showRecordFunction({ show: false });
                 postClassroomEvent('joined');
               },
               error: handleJoinError,

@@ -91,7 +91,15 @@ const meetingInput = ({ title, planStart, planEnd }) => ({
   duration: Math.max(1, Math.ceil((new Date(planEnd).getTime() - new Date(planStart).getTime()) / 60_000)),
   timezone: 'UTC',
   password: randomBytes(5).toString('hex'),
-  settings: { waiting_room: true, join_before_host: false, host_video: true, participant_video: true },
+  settings: {
+    waiting_room: true,
+    join_before_host: false,
+    host_video: true,
+    participant_video: true,
+    meeting_authentication: false,
+    auto_recording: 'none',
+    disable_recording_control: 'all',
+  },
 });
 
 export const createZoomMeeting = async (key, details) => {
@@ -104,7 +112,7 @@ export const createZoomMeeting = async (key, details) => {
   const meeting = await zoomApi(key, account, `/users/${encodeURIComponent(account.userId)}/meetings`, {
     method: 'POST', body: meetingInput(details),
   });
-  return { meetingId: String(meeting.id), passcode: meeting.password || '', joinUrl: meeting.join_url || '' };
+  return { meetingId: String(meeting.id), passcode: meeting.password || '' };
 };
 
 export const updateZoomMeeting = async (key, meetingId, details) => {
@@ -118,15 +126,6 @@ export const deleteZoomMeeting = async (key, meetingId) => {
   const account = getAccount(key);
   if (!account || !meetingId) return;
   await zoomApi(key, account, `/meetings/${encodeURIComponent(meetingId)}`, { method: 'DELETE' });
-};
-
-// start_url carries a host token. Return it only to the class host so the Zoom app
-// starts the meeting instead of leaving them on Zoom's signed-in home page.
-export const getZoomHostStartUrl = async (key, meetingId) => {
-  const account = getAccount(key);
-  if (!account || !meetingId) return '';
-  const meeting = await zoomApi(key, account, `/meetings/${encodeURIComponent(meetingId)}`);
-  return typeof meeting.start_url === 'string' ? meeting.start_url : '';
 };
 
 export const generateMeetingSdkToken = async ({ accountKey, meetingNumber, isHost }) => {
