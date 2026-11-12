@@ -92,8 +92,9 @@ const meetingInput = ({ title, planStart, planEnd }) => ({
   timezone: 'UTC',
   password: randomBytes(5).toString('hex'),
   settings: {
-    waiting_room: true,
-    join_before_host: false,
+    waiting_room: false,
+    join_before_host: true,
+    jbh_time: 0,
     host_video: true,
     participant_video: false,
     disable_participant_video: true,

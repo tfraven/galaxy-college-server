@@ -42,12 +42,12 @@ const weekdayFor = ({ year, month, day }) => new Date(Date.UTC(year, month - 1, 
  * Called on session-list reads and by the optional authenticated platform cron endpoint.
  */
 export const runLiveSessionScheduler = async (now = new Date()) => {
-  // Existing sessions predate the explicit recording/authentication policy.
-  // Patch each once so account defaults cannot silently re-enable those features.
+  // Migrate existing sessions to the no-recording and automatic-entry policy.
+  // This also disables waiting rooms so students do not need a host to admit them.
   const sessionsNeedingPolicy = await sql`
     SELECT id, title, plan_start, plan_end, zoom_account, zoom_meeting_id
     FROM live_sessions
-    WHERE zoom_meeting_id IS NOT NULL AND zoom_policy_version < 2
+    WHERE zoom_meeting_id IS NOT NULL AND zoom_policy_version < 3
       AND status IN (1, 2) AND plan_end > ${now.toISOString()} AND deleted_at IS NULL
     ORDER BY id LIMIT 100
   `;
@@ -58,7 +58,7 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
         planStart: session.plan_start,
         planEnd: session.plan_end,
       });
-      await sql`UPDATE live_sessions SET zoom_policy_version = 2 WHERE id = ${session.id} AND zoom_policy_version < 2`;
+      await sql`UPDATE live_sessions SET zoom_policy_version = 3 WHERE id = ${session.id} AND zoom_policy_version < 3`;
     } catch (error) {
       console.warn('[live-scheduler] could not apply Zoom meeting policy', {
         sessionId: session.id,
@@ -151,7 +151,7 @@ export const runLiveSessionScheduler = async (now = new Date()) => {
       )
       SELECT class_id, section_id, course_name, title, host_id, ${occurrence.start.toISOString()}, ${occurrence.end.toISOString()},
              1, created_by, id, ${occurrence.key}, TRUE, ${schedule.zoom_account || 'account1'},
-             ${meeting.meetingId}, ${meeting.passcode}, 2
+             ${meeting.meetingId}, ${meeting.passcode}, 3
       FROM recurring_live_schedules WHERE id = ${schedule.id} AND enabled = TRUE AND deleted_at IS NULL
       ON CONFLICT (recurring_schedule_id, recurrence_key) WHERE recurrence_key IS NOT NULL DO NOTHING
       RETURNING id, class_id, section_id, course_name, title, plan_start
