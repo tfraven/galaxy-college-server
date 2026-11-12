@@ -105,7 +105,7 @@
             }
             message.textContent = 'Could not join the Zoom meeting.';
             detail.textContent = errorCode === 4011
-              ? 'Zoom rejected this cross-account join (error 4011). The Meeting SDK app must pass Zoom Marketplace review and be activated or published (an approved unlisted app is also supported). After approval, confirm the participant linked a Zoom account; OBF also requires that user to already be in the meeting.'
+              ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app. Create a General app with Meeting SDK turned on while signed in as the same Zoom user who hosts the class, put that app’s Client ID and Client Secret in ZOOM_SDK_KEY and ZOOM_SDK_SECRET, then create the class again. The Server-to-Server app is only activated, not published.'
               : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
             console.error('[classroom] Zoom join failed', {
               errorCode: errorCode || undefined,
