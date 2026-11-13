@@ -6,43 +6,134 @@
   <link rel="preconnect" href="https://source.zoom.us" crossorigin>
   <title>Galaxy College Live Class</title>
   <style>
-    html,body{margin:0;width:100%;height:100%;min-height:100%;background:#0b1220;color:#e2e8f0;font:15px Arial,sans-serif;overflow:hidden}
+    html,body{margin:0;width:100%;height:100%;min-height:100%;background:#0b1220;color:#e2e8f0;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
     body{min-height:100dvh;overscroll-behavior:none}
+    
     #status{position:fixed;z-index:10000;top:max(12px,env(safe-area-inset-top,12px));left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 32px));display:grid;place-items:center;text-align:center;padding:12px 16px;box-sizing:border-box;background:rgba(11,18,32,.94);border:1px solid #334155;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.35);pointer-events:none}
-    #status>div{max-width:520px}#detail{color:#94a3b8;line-height:1.5;margin-top:9px}
-    #zmmtg-root{position:fixed!important;inset:0!important;display:block!important;width:100vw!important;height:100dvh!important;min-height:0!important;max-width:100vw!important;overflow:hidden!important}
-    #zmmtg-root>*{max-width:100vw!important}
+    #status>div{max-width:520px}#detail{color:#94a3b8;line-height:1.5;margin-top:8px}
+
+    /* Full-bleed responsive video canvas & screen share */
+    #zmmtg-root{position:fixed!important;inset:0!important;display:block!important;width:100vw!important;height:100dvh!important;min-height:0!important;max-width:100vw!important;background:#000!important;overflow:hidden!important}
+    #zmmtg-root .meeting-client,
+    #zmmtg-root .meeting-client-inner,
+    #zmmtg-root .main-layout,
+    #zmmtg-root .main-layout-app,
+    #zmmtg-root .sharing-layout,
+    #zmmtg-root .speaker-view,
+    #zmmtg-root .speaker-layout,
+    #zmmtg-root .video-container,
+    #zmmtg-root .client-scaling-view-container,
+    #zmmtg-root .ax-video-layout,
+    #zmmtg-root #wc-container-right,
+    #zmmtg-root #wc-container-left{width:100%!important;height:100%!important;max-width:100vw!important;max-height:100dvh!important}
+    #zmmtg-root canvas,
+    #zmmtg-root video{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important}
+
+    /* Floating Presenter & Focus Bar */
+    #presenter-bar{position:fixed;z-index:9000;top:max(8px,env(safe-area-inset-top,8px));left:50%;transform:translateX(-50%);width:min(620px,calc(100% - 16px));background:rgba(15,23,42,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(51,65,85,.85);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:6px 10px;box-sizing:border-box;display:none}
+    #presenter-bar.active{display:block}
+    .bar-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+    .bar-label{font-size:12px;font-weight:600;color:#94a3b8;display:flex;align-items:center;gap:6px}
+    .bar-label .live-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e}
+    .bar-right{display:flex;align-items:center;gap:6px}
+    .audio-pill{background:#1e293b;border:1px solid #334155;color:#e2e8f0;font-size:11px;padding:3px 8px;border-radius:14px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;transition:all .15s ease}
+    .audio-pill.on{background:rgba(16,185,129,.18);border-color:#10b981;color:#34d399}
+    .audio-pill.off{background:rgba(239,68,68,.18);border-color:#ef4444;color:#fca5a5}
+    .bar-toggle{background:none;border:none;color:#94a3b8;font-size:14px;cursor:pointer;padding:2px 6px;line-height:1}
+    .chips-scroll{display:flex;align-items:center;gap:6px;overflow-x:auto;padding-top:6px;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+    .chips-scroll::-webkit-scrollbar{height:3px}
+    .chips-scroll::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+    .presenter-chip{flex-shrink:0;background:#1e293b;border:1px solid #334155;color:#cbd5e1;font-size:12px;padding:4px 9px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s ease;user-select:none}
+    .presenter-chip:hover{background:#334155;color:#fff}
+    .presenter-chip.active{background:rgba(16,185,129,.22);border-color:#10b981;color:#34d399;font-weight:600}
+    .presenter-chip .chip-role{font-size:10px;padding:1px 5px;border-radius:4px;background:#334155;color:#94a3b8}
+    .presenter-chip.active .chip-role{background:#059669;color:#fff}
+    #presenter-bar.collapsed .chips-scroll{display:none}
+
+    /* Pre-Join Dialog (Fallback if opened without audio param) */
+    #prejoin-overlay{position:fixed;z-index:10001;inset:0;background:rgba(11,18,32,.94);display:none;place-items:center;padding:16px;box-sizing:border-box}
+    #prejoin-overlay.active{display:grid}
+    .prejoin-box{background:#141d2e;border:1px solid #24334c;border-radius:16px;max-width:440px;width:100%;padding:22px 20px;box-shadow:0 12px 36px rgba(0,0,0,.6);text-align:center}
+    .prejoin-title{font-size:18px;font-weight:700;color:#fff;margin:0 0 6px 0}
+    .prejoin-sub{font-size:13px;color:#94a3b8;margin:0 0 18px 0;line-height:1.4}
+    .prejoin-options{display:flex;flex-direction:column;gap:10px;margin-bottom:20px;text-align:left}
+    .prejoin-opt{border:1px solid #334155;background:#1e293b;border-radius:10px;padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:all .15s ease}
+    .prejoin-opt.selected{border-color:#10b981;background:rgba(16,185,129,.14)}
+    .opt-icon{font-size:20px}
+    .opt-name{font-size:13px;font-weight:600;color:#fff}
+    .opt-desc{font-size:11px;color:#94a3b8;margin-top:2px}
+    .prejoin-btn{width:100%;background:#059669;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s ease}
+    .prejoin-btn:hover{background:#10b981}
+
+    /* Common blocked buttons */
     button[aria-label*="invite" i],button[title*="invite" i],
     [role="button"][aria-label*="invite" i],[role="button"][title*="invite" i],
     a[href*="/j/"],a[href*="/w/"]{display:none!important}
     @supports not (height:100dvh){body{min-height:100vh}#zmmtg-root{height:100vh!important}}
-    @media(max-width:600px){
-      html,body{font-size:14px}
-      #status{top:max(8px,env(safe-area-inset-top,8px));width:calc(100% - 20px);padding:10px 12px;border-radius:10px}
-      #detail{font-size:13px;line-height:1.4;margin-top:6px}
-    }
-    @media(orientation:landscape) and (max-height:500px){
-      #status{top:4px;padding:6px 10px}
-      #status>div{font-size:12px}
-      #detail{font-size:11px;margin-top:3px}
-    }
-    html.student-mode button[aria-label*="mute" i],html.student-mode button[title*="mute" i],
-    html.student-mode button[aria-label*="microphone" i],html.student-mode button[title*="microphone" i],
-    html.student-mode button[aria-label*="start video" i],html.student-mode button[aria-label*="stop video" i],
-    html.student-mode button[aria-label*="camera" i],html.student-mode button[title*="camera" i],
-    html.student-mode button[aria-label*="share screen" i],html.student-mode button[title*="share screen" i],
-    html.student-mode button[aria-label*="record" i],html.student-mode button[title*="record" i],
-    html.student-mode button[aria-label*="reaction" i],html.student-mode button[title*="reaction" i],
-    html.student-mode button[aria-label*="poll" i],html.student-mode button[title*="poll" i],
-    html.student-mode button[aria-label*="breakout" i],html.student-mode button[title*="breakout" i],
-    html.student-mode button[aria-label*="caption" i],html.student-mode button[title*="caption" i],
-    html.student-mode button[aria-label*="whiteboard" i],html.student-mode button[title*="whiteboard" i] { display:none !important }
+
+    /* Student Mode - Restrict broadcast only, PRESERVE audio listening & video/share viewing */
+    html.student-mode button[aria-label*="unmute" i]:not([aria-label*="join" i]),
+    html.student-mode button[aria-label*="start video" i],
+    html.student-mode button[aria-label*="camera" i]:not([aria-label*="join" i]),
+    html.student-mode button[aria-label*="share screen" i],
+    html.student-mode button[aria-label*="record" i],
+    html.student-mode button[aria-label*="reaction" i],
+    html.student-mode button[aria-label*="poll" i],
+    html.student-mode button[aria-label*="breakout" i],
+    html.student-mode button[aria-label*="whiteboard" i]{display:none!important}
   </style>
 </head>
 <body>
   <div id="status"><div><strong id="message">Connecting to the Zoom meeting…</strong><div id="detail">Joining your scheduled live class. Please wait.</div></div></div>
+
+  <!-- Pre-Join Audio Modal (Fallback) -->
+  <div id="prejoin-overlay">
+    <div class="prejoin-box">
+      <div style="font-size:32px;margin-bottom:8px">🎓</div>
+      <h2 class="prejoin-title">Galaxy College Classroom</h2>
+      <p class="prejoin-sub">Choose your audio preference before entering the live lecture.</p>
+      <div class="prejoin-options">
+        <div class="prejoin-opt selected" id="opt-audio-yes">
+          <div class="opt-icon">🔊</div>
+          <div>
+            <div class="opt-name">Join with Audio (Recommended)</div>
+            <div class="opt-desc">Connect speaker audio to hear the instructor. Microphones stay muted.</div>
+          </div>
+        </div>
+        <div class="prejoin-opt" id="opt-audio-no">
+          <div class="opt-icon">🔇</div>
+          <div>
+            <div class="opt-name">Join without Audio</div>
+            <div class="opt-desc">Listen in silent mode. You can connect audio anytime in class.</div>
+          </div>
+        </div>
+      </div>
+      <button id="btn-prejoin-confirm" class="prejoin-btn">Join Live Classroom</button>
+    </div>
+  </div>
+
+  <!-- Floating Presenter Chooser Bar -->
+  <div id="presenter-bar">
+    <div class="bar-row">
+      <div class="bar-label">
+        <span class="live-dot"></span>
+        <span>Watch Presenter:</span>
+      </div>
+      <div class="bar-right">
+        <button id="audio-toggle-btn" class="audio-pill on" title="Audio connection status">🔊 Audio On</button>
+        <button id="bar-collapse-btn" class="bar-toggle" title="Collapse / Expand panel">▼</button>
+      </div>
+    </div>
+    <div class="chips-scroll" id="chips-container">
+      <button class="presenter-chip active" id="chip-auto" data-id="auto">
+        <span>⚡ Auto (Speaker / Share)</span>
+      </button>
+    </div>
+  </div>
+
   <div id="zmmtg-root"></div>
   <div id="aria-notify-area"></div>
+
   <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react.min.js"></script>
   <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react-dom.min.js"></script>
   <script defer src="https://source.zoom.us/6.10.0/lib/vendor/redux.min.js"></script>
@@ -56,6 +147,15 @@
       var message = document.getElementById('message');
       var detail = document.getElementById('detail');
       var status = document.getElementById('status');
+      var presenterBar = document.getElementById('presenter-bar');
+      var chipsContainer = document.getElementById('chips-container');
+      var audioToggleBtn = document.getElementById('audio-toggle-btn');
+      var barCollapseBtn = document.getElementById('bar-collapse-btn');
+      var prejoinOverlay = document.getElementById('prejoin-overlay');
+      var optAudioYes = document.getElementById('opt-audio-yes');
+      var optAudioNo = document.getElementById('opt-audio-no');
+      var btnPrejoinConfirm = document.getElementById('btn-prejoin-confirm');
+
       var values = new URLSearchParams(window.location.hash.slice(1));
       var signature = values.get('j');
       var meetingNumber = values.get('m');
@@ -65,10 +165,18 @@
       var isHost = values.get('h') === '1';
       var requestedMode = values.get('r');
       var isStudent = !isHost && requestedMode !== 'participant';
+
+      var hasAudioParam = values.has('a');
+      var joinWithAudio = hasAudioParam ? (values.get('a') !== '0') : true;
+      var audioConnected = joinWithAudio;
+      var currentPinnedId = null;
+      var attendeesCache = [];
+
       if (isStudent) {
         document.documentElement.classList.add('student-mode');
         detail.textContent = 'Camera and microphone are disabled. Use chat to message your teacher.';
       }
+
       var leftUrl = window.location.origin + window.location.pathname + '?left=1';
       function postClassroomEvent(name, messageText) {
         var payload = { type: 'galaxy-classroom-' + name };
@@ -106,160 +214,382 @@
         return;
       }
 
-      window.history.replaceState(null, '', window.location.pathname);
-      window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
-      window.ZoomMtg.preLoadWasm();
-      window.ZoomMtg.prepareWebSDK();
-      window.ZoomMtg.init({
-        leaveUrl: leftUrl,
-        patchJsMedia: true,
-        disableInvite: true,
-        disableRecord: true,
-        disableCallOut: isStudent,
-        disableZoomPhone: isStudent,
-        disableReport: isStudent,
-        disablePreview: true,
-        showMeetingHeader: !isStudent,
-        meetingInfo: isStudent ? ['topic'] : ['topic', 'host', 'participant'],
-        isSupportAV: true,
-        isSupportChat: true,
-        isSupportQA: !isStudent,
-        isSupportPolling: !isStudent,
-        isSupportBreakout: !isStudent,
-        isSupportCC: !isStudent,
-        isSupportNonverbal: !isStudent,
-        screenShare: !isStudent,
-        sharingMode: 'fit',
-        success: function () {
-          message.textContent = 'Joining the Zoom meeting…';
-          detail.textContent = 'Waiting for Zoom to connect you to the class.';
-          var joinFinished = false;
-          function handleJoinError(error) {
-            if (joinFinished) return;
-            joinFinished = true;
-            window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
-            var errorCode = Number(error && (error.errorCode || error.code));
-            message.textContent = 'Could not join the Zoom meeting.';
-            detail.textContent = errorCode === 4011
-              ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app. Create a General app with Meeting SDK turned on while signed in as the same Zoom user who hosts the class, put that app’s Client ID and Client Secret in ZOOM_SDK_KEY and ZOOM_SDK_SECRET, then create the class again. The Server-to-Server app is only activated, not published.'
-              : (errorCode === 3051 || errorCode === 3052)
-                ? 'Zoom is requiring account sign-in. Ask the Zoom account admin to disable the meeting authentication requirement for this host account.'
-              : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
-            console.error('[classroom] Zoom join failed', {
-              errorCode: errorCode || undefined,
-              reason: error && error.reason,
-              message: error && error.message,
-            });
-            postClassroomEvent('error', detail.textContent);
-          }
-          function handleUnhandledJoinRejection(event) {
-            if (joinFinished) return;
-            var error = event && event.reason;
-            var errorCode = Number(error && (error.errorCode || error.code));
-            if (errorCode !== 4011 && (!error || error.type !== 'JOIN_MEETING_FAILED')) return;
-            event.preventDefault();
-            handleJoinError(error);
-          }
+      function updateAudioBtnUI() {
+        if (!audioToggleBtn) return;
+        if (audioConnected) {
+          audioToggleBtn.className = 'audio-pill on';
+          audioToggleBtn.textContent = '🔊 Audio On';
+        } else {
+          audioToggleBtn.className = 'audio-pill off';
+          audioToggleBtn.textContent = '🔇 Connect Audio';
+        }
+      }
 
-          window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
-          try {
-            var joinResult = window.ZoomMtg.join({
-              signature: signature,
-              meetingNumber: meetingNumber,
-              passWord: password,
-              userName: userName,
-              zak: zak,
-              success: function () {
-                if (joinFinished) return;
-                joinFinished = true;
-                window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
-                status.style.display = 'none';
-                document.getElementById('zmmtg-root').style.display = 'block';
-                window.ZoomMtg.showInviteFunction({ show: false });
-                window.ZoomMtg.showRecordFunction({ show: false });
-                var controlSelector = 'button,[role="button"],a';
-                var blockedControlPatterns = [
-                  /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
-                ];
-                if (isStudent) {
-                  blockedControlPatterns.push(/\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|invite|record|reaction|poll|breakout|caption|whiteboard)\b/i);
-                }
-                var watchControls = function (blockedPatterns, preserveChatAndLeave) {
-                  var applyBlockedControls = function (root, includeChildren) {
-                    if (!root || root.nodeType !== 1) return;
-                    var candidates = new Set();
-                    var closest = root.closest && root.closest(controlSelector);
-                    if (closest) candidates.add(closest);
-                    if (root.matches && root.matches(controlSelector)) candidates.add(root);
-                    if (includeChildren && root.querySelectorAll) {
-                      root.querySelectorAll(controlSelector).forEach(function (control) { candidates.add(control); });
-                    }
-                    candidates.forEach(function (control) {
-                      var label = [
-                        control.getAttribute('aria-label'),
-                        control.getAttribute('title'),
-                        control.getAttribute('data-tooltip'),
-                        control.textContent,
-                        control.getAttribute('href')
-                      ].filter(Boolean).join(' ').trim();
-                      var shouldHide = blockedPatterns.some(function (blocked, index) {
-                        if (preserveChatAndLeave && index > 0 && /\b(chat|leave)\b/i.test(label)) return false;
-                        return blocked.test(label);
-                      });
-                      if (shouldHide) {
-                        control.style.setProperty('display', 'none', 'important');
-                      }
-                    });
-                  };
-                  applyBlockedControls(document.body, true);
-                  var scheduledRoots = new Map();
-                  var scanScheduled = false;
-                  var observer = new MutationObserver(function (changes) {
-                    changes.forEach(function (change) {
-                      if (change.target && change.target.nodeType === 1 && !scheduledRoots.has(change.target)) {
-                        scheduledRoots.set(change.target, false);
-                      }
-                      change.addedNodes && change.addedNodes.forEach(function (node) {
-                        if (node.nodeType === 1) scheduledRoots.set(node, true);
-                      });
-                    });
-                    if (scanScheduled || scheduledRoots.size === 0) return;
-                    scanScheduled = true;
-                    window.requestAnimationFrame(function () {
-                      scanScheduled = false;
-                      scheduledRoots.forEach(function (includeChildren, root) {
-                        applyBlockedControls(root, includeChildren);
-                      });
-                      scheduledRoots.clear();
-                    });
-                  });
-                  observer.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    attributeFilter: ['aria-label', 'title', 'data-tooltip', 'href']
-                  });
-                  return observer;
-                };
-                if (isStudent) window.ZoomMtg.showMeetingHeader({ show: false });
-                watchControls(blockedControlPatterns, isStudent);
-                postClassroomEvent('joined');
-              },
-              error: handleJoinError,
-            });
-            if (joinResult && typeof joinResult.catch === 'function') {
-              joinResult.catch(handleJoinError);
+      function attemptAutoConnectAudio() {
+        if (!joinWithAudio) return;
+        var attempts = 0;
+        var timer = setInterval(function () {
+          attempts++;
+          var buttons = document.querySelectorAll('button, [role="button"]');
+          for (var i = 0; i < buttons.length; i++) {
+            var btn = buttons[i];
+            if (btn.closest('#presenter-bar') || btn.closest('#prejoin-overlay')) continue;
+            var text = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
+            if (text.includes('computer audio') || text.includes('join audio') || text.includes('join with computer audio')) {
+              btn.click();
+              clearInterval(timer);
+              audioConnected = true;
+              updateAudioBtnUI();
+              return;
             }
-          } catch (error) {
-            handleJoinError(error);
           }
-        },
-        error: function (error) {
-          message.textContent = 'Could not start the Zoom meeting.';
-          detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
-          postClassroomEvent('error', detail.textContent);
-        },
-      });
+          if (attempts > 25) clearInterval(timer);
+        }, 500);
+      }
+
+      function triggerManualAudioConnect() {
+        var buttons = document.querySelectorAll('button, [role="button"]');
+        var found = false;
+        for (var i = 0; i < buttons.length; i++) {
+          var btn = buttons[i];
+          if (btn.closest('#presenter-bar') || btn.closest('#prejoin-overlay')) continue;
+          var text = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
+          if (text.includes('computer audio') || text.includes('join audio') || text.includes('join with computer audio')) {
+            btn.click();
+            found = true;
+            audioConnected = true;
+            updateAudioBtnUI();
+            break;
+          }
+        }
+        if (!found && window.ZoomMtg && window.ZoomMtg.showJoinAudioFunction) {
+          try {
+            window.ZoomMtg.showJoinAudioFunction({ show: true });
+          } catch (e) {}
+        }
+      }
+
+      if (audioToggleBtn) {
+        audioToggleBtn.addEventListener('click', function () {
+          if (!audioConnected) {
+            triggerManualAudioConnect();
+          }
+        });
+      }
+
+      if (barCollapseBtn) {
+        barCollapseBtn.addEventListener('click', function () {
+          presenterBar.classList.toggle('collapsed');
+          barCollapseBtn.textContent = presenterBar.classList.contains('collapsed') ? '▲' : '▼';
+        });
+      }
+
+      function pinPresenter(userId) {
+        if (currentPinnedId && currentPinnedId !== userId) {
+          try {
+            window.ZoomMtg.operatePin({ userId: currentPinnedId, operate: 'remove' });
+            window.ZoomMtg.operatePin({ oderId: currentPinnedId, action: 'remove' });
+          } catch (e) {}
+        }
+        currentPinnedId = userId;
+        try {
+          window.ZoomMtg.operatePin({ userId: userId, operate: 'add' });
+          window.ZoomMtg.operatePin({ oderId: userId, action: 'add' });
+        } catch (e) {}
+        renderPresenterChips();
+      }
+
+      function unpinToAuto() {
+        if (currentPinnedId) {
+          try {
+            window.ZoomMtg.operatePin({ userId: currentPinnedId, operate: 'remove' });
+            window.ZoomMtg.operatePin({ oderId: currentPinnedId, action: 'remove' });
+          } catch (e) {}
+          currentPinnedId = null;
+        }
+        renderPresenterChips();
+      }
+
+      function renderPresenterChips() {
+        if (!chipsContainer) return;
+        chipsContainer.innerHTML = '';
+
+        var autoBtn = document.createElement('button');
+        autoBtn.className = 'presenter-chip' + (currentPinnedId === null ? ' active' : '');
+        autoBtn.innerHTML = '<span>⚡ Auto (Speaker / Share)</span>';
+        autoBtn.addEventListener('click', unpinToAuto);
+        chipsContainer.appendChild(autoBtn);
+
+        var presenters = attendeesCache.filter(function (attendee) {
+          var name = (attendee.userName || '').toLowerCase();
+          var isStaff = attendee.isHost || attendee.isCoHost ||
+                        name.includes('teacher') || name.includes('prof') ||
+                        name.includes('host') || name.includes('admin') ||
+                        name.includes('operator');
+          return isStaff || attendee.bVideoOn || attendee.bSharing;
+        });
+
+        // Ensure host is listed even if video is currently loading
+        if (presenters.length === 0 && attendeesCache.length > 0) {
+          presenters = attendeesCache.slice(0, 3);
+        }
+
+        presenters.forEach(function (p) {
+          var chip = document.createElement('button');
+          var isPinned = currentPinnedId === p.userId;
+          chip.className = 'presenter-chip' + (isPinned ? ' active' : '');
+
+          var rawName = p.userName || 'Presenter';
+          var cleanName = rawName.length > 16 ? rawName.slice(0, 14) + '…' : rawName;
+          var roleLabel = p.isHost ? 'Teacher / Host' :
+                          (p.userName || '').toLowerCase().includes('operator') ? 'Operator' :
+                          (p.userName || '').toLowerCase().includes('admin') ? 'Admin' :
+                          p.isCoHost ? 'Co-Host' : (p.bSharing ? 'Screen' : 'Live Cam');
+
+          var icon = p.bSharing ? '🖥️' : '📹';
+          chip.innerHTML = '<span>' + icon + ' ' + cleanName + '</span><span class="chip-role">' + roleLabel + '</span>';
+          chip.addEventListener('click', function () {
+            pinPresenter(p.userId);
+          });
+          chipsContainer.appendChild(chip);
+        });
+      }
+
+      function autoPinInitialPresenter() {
+        if (currentPinnedId) return;
+        var sharer = attendeesCache.find(function (a) { return a.bSharing; });
+        if (sharer) return;
+
+        var hostWithVideo = attendeesCache.find(function (a) { return (a.isHost || a.isCoHost) && a.bVideoOn; });
+        var anyWithVideo = hostWithVideo ||
+                           attendeesCache.find(function (a) { return a.bVideoOn; }) ||
+                           attendeesCache.find(function (a) { return a.isHost; });
+        if (anyWithVideo && anyWithVideo.userId) {
+          pinPresenter(anyWithVideo.userId);
+        }
+      }
+
+      function refreshAttendees() {
+        if (!window.ZoomMtg || !window.ZoomMtg.getAttendeeslist) return;
+        try {
+          window.ZoomMtg.getAttendeeslist({
+            success: function (res) {
+              if (res && res.result && Array.isArray(res.result.attendeeList)) {
+                attendeesCache = res.result.attendeeList;
+                renderPresenterChips();
+                autoPinInitialPresenter();
+              }
+            },
+            error: function () {}
+          });
+        } catch (e) {}
+      }
+
+      function startZoomSession() {
+        window.history.replaceState(null, '', window.location.pathname);
+        window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
+        window.ZoomMtg.preLoadWasm();
+        window.ZoomMtg.prepareWebSDK();
+        window.ZoomMtg.init({
+          leaveUrl: leftUrl,
+          patchJsMedia: true,
+          disableInvite: true,
+          disableRecord: true,
+          disableCallOut: isStudent,
+          disableZoomPhone: isStudent,
+          disableReport: isStudent,
+          disablePreview: true,
+          disableJoinAudio: !joinWithAudio,
+          showMeetingHeader: !isStudent,
+          meetingInfo: isStudent ? ['topic'] : ['topic', 'host', 'participant'],
+          isSupportAV: true,
+          isSupportChat: true,
+          isSupportQA: !isStudent,
+          isSupportPolling: !isStudent,
+          isSupportBreakout: !isStudent,
+          isSupportCC: !isStudent,
+          isSupportNonverbal: !isStudent,
+          screenShare: true,
+          sharingMode: 'both',
+          showPureSharingContent: true,
+          success: function () {
+            message.textContent = 'Joining the Zoom meeting…';
+            detail.textContent = 'Waiting for Zoom to connect you to the class.';
+            var joinFinished = false;
+
+            function handleJoinError(error) {
+              if (joinFinished) return;
+              joinFinished = true;
+              window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
+              var errorCode = Number(error && (error.errorCode || error.code));
+              message.textContent = 'Could not join the Zoom meeting.';
+              detail.textContent = errorCode === 4011
+                ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app.'
+                : (errorCode === 3051 || errorCode === 3052)
+                  ? 'Zoom is requiring account sign-in. Ask the Zoom account admin to disable the meeting authentication requirement.'
+                : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
+              console.error('[classroom] Zoom join failed', {
+                errorCode: errorCode || undefined,
+                reason: error && error.reason,
+                message: error && error.message,
+              });
+              postClassroomEvent('error', detail.textContent);
+            }
+
+            function handleUnhandledJoinRejection(event) {
+              if (joinFinished) return;
+              var error = event && event.reason;
+              var errorCode = Number(error && (error.errorCode || error.code));
+              if (errorCode !== 4011 && (!error || error.type !== 'JOIN_MEETING_FAILED')) return;
+              event.preventDefault();
+              handleJoinError(error);
+            }
+
+            window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
+            try {
+              var joinResult = window.ZoomMtg.join({
+                signature: signature,
+                meetingNumber: meetingNumber,
+                passWord: password,
+                userName: userName,
+                zak: zak,
+                success: function () {
+                  if (joinFinished) return;
+                  joinFinished = true;
+                  window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
+                  status.style.display = 'none';
+                  document.getElementById('zmmtg-root').style.display = 'block';
+                  presenterBar.classList.add('active');
+                  updateAudioBtnUI();
+
+                  window.ZoomMtg.showInviteFunction({ show: false });
+                  window.ZoomMtg.showRecordFunction({ show: false });
+                  try { window.ZoomMtg.allowMultiPin({ allow: true }); } catch (e) {}
+
+                  // Listen for participant and view state changes
+                  try {
+                    window.ZoomMtg.inMeetingServiceListener('onUserJoin', function () { refreshAttendees(); });
+                    window.ZoomMtg.inMeetingServiceListener('onUserLeave', function () { refreshAttendees(); });
+                    window.ZoomMtg.inMeetingServiceListener('onUserUpdate', function () { refreshAttendees(); });
+                    window.ZoomMtg.inMeetingServiceListener('onActiveSpeaker', function () { refreshAttendees(); });
+                  } catch (e) {}
+
+                  refreshAttendees();
+                  setInterval(refreshAttendees, 4000);
+                  attemptAutoConnectAudio();
+
+                  var controlSelector = 'button,[role="button"],a';
+                  var blockedControlPatterns = [
+                    /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
+                  ];
+                  if (isStudent) {
+                    blockedControlPatterns.push(/\b(start video|turn on camera|stop video|unmute|share screen|start share|record|reaction|poll|breakout|whiteboard)\b/i);
+                  }
+
+                  var watchControls = function (blockedPatterns) {
+                    var applyBlockedControls = function (root, includeChildren) {
+                      if (!root || root.nodeType !== 1) return;
+                      var candidates = new Set();
+                      var closest = root.closest && root.closest(controlSelector);
+                      if (closest) candidates.add(closest);
+                      if (root.matches && root.matches(controlSelector)) candidates.add(root);
+                      if (includeChildren && root.querySelectorAll) {
+                        root.querySelectorAll(controlSelector).forEach(function (control) { candidates.add(control); });
+                      }
+                      candidates.forEach(function (control) {
+                        if (control.closest('#presenter-bar') || control.closest('#prejoin-overlay')) return;
+                        var label = [
+                          control.getAttribute('aria-label'),
+                          control.getAttribute('title'),
+                          control.getAttribute('data-tooltip'),
+                          control.textContent,
+                          control.getAttribute('href')
+                        ].filter(Boolean).join(' ').trim();
+
+                        var shouldHide = blockedPatterns.some(function (blocked, index) {
+                          if (index > 0 && /\b(chat|leave|join audio|computer audio|audio|pin|view|gallery|speaker)\b/i.test(label)) return false;
+                          return blocked.test(label);
+                        });
+                        if (shouldHide) {
+                          control.style.setProperty('display', 'none', 'important');
+                        }
+                      });
+                    };
+
+                    applyBlockedControls(document.body, true);
+                    var scheduledRoots = new Map();
+                    var scanScheduled = false;
+                    var observer = new MutationObserver(function (changes) {
+                      changes.forEach(function (change) {
+                        if (change.target && change.target.nodeType === 1 && !scheduledRoots.has(change.target)) {
+                          scheduledRoots.set(change.target, false);
+                        }
+                        change.addedNodes && change.addedNodes.forEach(function (node) {
+                          if (node.nodeType === 1) scheduledRoots.set(node, true);
+                        });
+                      });
+                      if (scanScheduled || scheduledRoots.size === 0) return;
+                      scanScheduled = true;
+                      window.requestAnimationFrame(function () {
+                        scanScheduled = false;
+                        scheduledRoots.forEach(function (includeChildren, root) {
+                          applyBlockedControls(root, includeChildren);
+                        });
+                        scheduledRoots.clear();
+                      });
+                    });
+                    observer.observe(document.body, {
+                      childList: true,
+                      subtree: true,
+                      attributes: true,
+                      attributeFilter: ['aria-label', 'title', 'data-tooltip', 'href']
+                    });
+                    return observer;
+                  };
+
+                  if (isStudent) window.ZoomMtg.showMeetingHeader({ show: false });
+                  watchControls(blockedControlPatterns);
+                  postClassroomEvent('joined');
+                },
+                error: handleJoinError,
+              });
+              if (joinResult && typeof joinResult.catch === 'function') {
+                joinResult.catch(handleJoinError);
+              }
+            } catch (error) {
+              handleJoinError(error);
+            }
+          },
+          error: function (error) {
+            message.textContent = 'Could not start the Zoom meeting.';
+            detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
+            postClassroomEvent('error', detail.textContent);
+          },
+        });
+      }
+
+      // Check if user pre-selected audio (from Android app) or needs fallback pre-join screen
+      if (!hasAudioParam) {
+        prejoinOverlay.classList.add('active');
+        optAudioYes.addEventListener('click', function () {
+          optAudioYes.classList.add('selected');
+          optAudioNo.classList.remove('selected');
+          joinWithAudio = true;
+          audioConnected = true;
+        });
+        optAudioNo.addEventListener('click', function () {
+          optAudioNo.classList.add('selected');
+          optAudioYes.classList.remove('selected');
+          joinWithAudio = false;
+          audioConnected = false;
+        });
+        btnPrejoinConfirm.addEventListener('click', function () {
+          prejoinOverlay.classList.remove('active');
+          startZoomSession();
+        });
+      } else {
+        startZoomSession();
+      }
     }());
     }, { once: true });
   </script>
