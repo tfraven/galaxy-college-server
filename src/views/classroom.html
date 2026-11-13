@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="preconnect" href="https://source.zoom.us" crossorigin>
   <title>Galaxy College Live Class</title>
   <style>
     html,body{margin:0;width:100%;height:100%;min-height:100%;background:#0b1220;color:#e2e8f0;font:15px Arial,sans-serif;overflow:hidden}
@@ -11,6 +12,9 @@
     #status>div{max-width:520px}#detail{color:#94a3b8;line-height:1.5;margin-top:9px}
     #zmmtg-root{position:fixed!important;inset:0!important;display:block!important;width:100vw!important;height:100dvh!important;min-height:0!important;max-width:100vw!important;overflow:hidden!important}
     #zmmtg-root>*{max-width:100vw!important}
+    button[aria-label*="invite" i],button[title*="invite" i],
+    [role="button"][aria-label*="invite" i],[role="button"][title*="invite" i],
+    a[href*="/j/"],a[href*="/w/"]{display:none!important}
     @supports not (height:100dvh){body{min-height:100vh}#zmmtg-root{height:100vh!important}}
     @media(max-width:600px){
       html,body{font-size:14px}
@@ -28,7 +32,6 @@
     html.student-mode button[aria-label*="camera" i],html.student-mode button[title*="camera" i],
     html.student-mode button[aria-label*="share screen" i],html.student-mode button[title*="share screen" i],
     html.student-mode button[aria-label*="participant" i],html.student-mode button[title*="participant" i],
-    html.student-mode button[aria-label*="invite" i],html.student-mode button[title*="invite" i],
     html.student-mode button[aria-label*="record" i],html.student-mode button[title*="record" i],
     html.student-mode button[aria-label*="reaction" i],html.student-mode button[title*="reaction" i],
     html.student-mode button[aria-label*="poll" i],html.student-mode button[title*="poll" i],
@@ -42,14 +45,15 @@
   <div id="status"><div><strong id="message">Connecting to the Zoom meeting…</strong><div id="detail">Joining your scheduled live class. Please wait.</div></div></div>
   <div id="zmmtg-root"></div>
   <div id="aria-notify-area"></div>
-  <script src="https://source.zoom.us/6.5.0/lib/vendor/react.min.js"></script>
-  <script src="https://source.zoom.us/6.5.0/lib/vendor/react-dom.min.js"></script>
-  <script src="https://source.zoom.us/6.5.0/lib/vendor/react-redux.min.js"></script>
-  <script src="https://source.zoom.us/6.5.0/lib/vendor/redux.min.js"></script>
-  <script src="https://source.zoom.us/6.5.0/lib/vendor/redux-thunk.min.js"></script>
-  <script src="https://source.zoom.us/6.5.0/lib/vendor/lodash.min.js"></script>
-  <script src="https://source.zoom.us/zoom-meeting-6.5.0.min.js"></script>
+  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/react.min.js"></script>
+  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/react-dom.min.js"></script>
+  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/redux.min.js"></script>
+  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/redux-thunk.min.js"></script>
+  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/react-redux.min.js"></script>
+  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/lodash.min.js"></script>
+  <script defer src="https://source.zoom.us/zoom-meeting-6.5.0.min.js"></script>
   <script>
+    window.addEventListener('DOMContentLoaded', function () {
     (function () {
       var message = document.getElementById('message');
       var detail = document.getElementById('detail');
@@ -174,29 +178,50 @@
                 document.getElementById('zmmtg-root').style.display = 'block';
                 window.ZoomMtg.showInviteFunction({ show: false });
                 window.ZoomMtg.showRecordFunction({ show: false });
-                if (isStudent) {
-                  window.ZoomMtg.showMeetingHeader({ show: false });
-                  var hideStudentControls = function () {
-                    var blocked = /\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i;
-                    document.querySelectorAll('button,[role="button"]').forEach(function (control) {
+                var controlSelector = 'button,[role="button"],a';
+                var watchControls = function (blocked, preserveChatAndLeave) {
+                  var applyBlockedControls = function (root, includeChildren) {
+                    if (!root || root.nodeType !== 1) return;
+                    var candidates = new Set();
+                    var closest = root.closest && root.closest(controlSelector);
+                    if (closest) candidates.add(closest);
+                    if (root.matches && root.matches(controlSelector)) candidates.add(root);
+                    if (includeChildren && root.querySelectorAll) {
+                      root.querySelectorAll(controlSelector).forEach(function (control) { candidates.add(control); });
+                    }
+                    candidates.forEach(function (control) {
                       var label = [
                         control.getAttribute('aria-label'),
                         control.getAttribute('title'),
                         control.getAttribute('data-tooltip'),
-                        control.innerText
+                        control.textContent,
+                        control.getAttribute('href')
                       ].filter(Boolean).join(' ').trim();
-                      if (!label || /\bchat\b/i.test(label) || /\bleave\b/i.test(label)) return;
+                      if (preserveChatAndLeave && /\b(chat|leave)\b/i.test(label)) return;
                       if (blocked.test(label)) control.style.setProperty('display', 'none', 'important');
                     });
                   };
-                  hideStudentControls();
-                  var studentControlsObserver = new MutationObserver(hideStudentControls);
-                  studentControlsObserver.observe(document.body, {
+                  applyBlockedControls(document.body, true);
+                  var observer = new MutationObserver(function (changes) {
+                    changes.forEach(function (change) {
+                      applyBlockedControls(change.target, false);
+                      change.addedNodes && change.addedNodes.forEach(function (node) {
+                        applyBlockedControls(node, true);
+                      });
+                    });
+                  });
+                  observer.observe(document.body, {
                     childList: true,
                     subtree: true,
                     attributes: true,
-                    attributeFilter: ['aria-label', 'title', 'data-tooltip']
+                    attributeFilter: ['aria-label', 'title', 'data-tooltip', 'href']
                   });
+                  return observer;
+                };
+                watchControls(/\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i, false);
+                if (isStudent) {
+                  window.ZoomMtg.showMeetingHeader({ show: false });
+                  watchControls(/\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i, true);
                 }
                 postClassroomEvent('joined');
               },
@@ -216,6 +241,7 @@
         },
       });
     }());
+    }, { once: true });
   </script>
 </body>
 </html>

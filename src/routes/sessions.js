@@ -641,7 +641,7 @@ sessionsRouter.post('/:id/join-token', asyncHandler(async (req, res) => {
     data: {
       signature, sdkJwt, meetingNumber: session.zoom_meeting_id, password: session.zoom_passcode || '',
       zak: participantToken,
-      authMode, userName: req.user.fullName, isHost, expiresAt,
+      authMode, userName: req.user.fullName, title: session.title, isHost, expiresAt,
     },
   });
 }));
