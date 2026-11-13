@@ -45,13 +45,13 @@
   <div id="status"><div><strong id="message">Connecting to the Zoom meeting…</strong><div id="detail">Joining your scheduled live class. Please wait.</div></div></div>
   <div id="zmmtg-root"></div>
   <div id="aria-notify-area"></div>
-  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/react.min.js"></script>
-  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/react-dom.min.js"></script>
-  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/redux.min.js"></script>
-  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/redux-thunk.min.js"></script>
-  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/react-redux.min.js"></script>
-  <script defer src="https://source.zoom.us/6.5.0/lib/vendor/lodash.min.js"></script>
-  <script defer src="https://source.zoom.us/zoom-meeting-6.5.0.min.js"></script>
+  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react.min.js"></script>
+  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react-dom.min.js"></script>
+  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/redux.min.js"></script>
+  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/redux-thunk.min.js"></script>
+  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react-redux.min.js"></script>
+  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/lodash.min.js"></script>
+  <script defer src="https://source.zoom.us/zoom-meeting-6.10.0.min.js"></script>
   <script>
     window.addEventListener('DOMContentLoaded', function () {
     (function () {
@@ -109,7 +109,7 @@
       }
 
       window.history.replaceState(null, '', window.location.pathname);
-      window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.5.0/lib', '/av');
+      window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
       window.ZoomMtg.preLoadWasm();
       window.ZoomMtg.prepareWebSDK();
       window.ZoomMtg.init({
@@ -122,6 +122,7 @@
         disableReport: isStudent,
         disablePreview: true,
         showMeetingHeader: !isStudent,
+        showPureSharingContent: isStudent,
         meetingInfo: isStudent ? ['topic'] : ['topic', 'host', 'participant'],
         isSupportAV: true,
         isSupportChat: true,
@@ -131,6 +132,7 @@
         isSupportCC: !isStudent,
         isSupportNonverbal: !isStudent,
         screenShare: !isStudent,
+        sharingMode: 'fit',
         success: function () {
           message.textContent = 'Joining the Zoom meeting…';
           detail.textContent = 'Waiting for Zoom to connect you to the class.';
@@ -179,7 +181,13 @@
                 window.ZoomMtg.showInviteFunction({ show: false });
                 window.ZoomMtg.showRecordFunction({ show: false });
                 var controlSelector = 'button,[role="button"],a';
-                var watchControls = function (blocked, preserveChatAndLeave) {
+                var blockedControlPatterns = [
+                  /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
+                ];
+                if (isStudent) {
+                  blockedControlPatterns.push(/\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i);
+                }
+                var watchControls = function (blockedPatterns, preserveChatAndLeave) {
                   var applyBlockedControls = function (root, includeChildren) {
                     if (!root || root.nodeType !== 1) return;
                     var candidates = new Set();
@@ -197,17 +205,35 @@
                         control.textContent,
                         control.getAttribute('href')
                       ].filter(Boolean).join(' ').trim();
-                      if (preserveChatAndLeave && /\b(chat|leave)\b/i.test(label)) return;
-                      if (blocked.test(label)) control.style.setProperty('display', 'none', 'important');
+                      var shouldHide = blockedPatterns.some(function (blocked, index) {
+                        if (preserveChatAndLeave && index > 0 && /\b(chat|leave)\b/i.test(label)) return false;
+                        return blocked.test(label);
+                      });
+                      if (shouldHide) {
+                        control.style.setProperty('display', 'none', 'important');
+                      }
                     });
                   };
                   applyBlockedControls(document.body, true);
+                  var scheduledRoots = new Map();
+                  var scanScheduled = false;
                   var observer = new MutationObserver(function (changes) {
                     changes.forEach(function (change) {
-                      applyBlockedControls(change.target, false);
+                      if (change.target && change.target.nodeType === 1 && !scheduledRoots.has(change.target)) {
+                        scheduledRoots.set(change.target, false);
+                      }
                       change.addedNodes && change.addedNodes.forEach(function (node) {
-                        applyBlockedControls(node, true);
+                        if (node.nodeType === 1) scheduledRoots.set(node, true);
                       });
+                    });
+                    if (scanScheduled || scheduledRoots.size === 0) return;
+                    scanScheduled = true;
+                    window.requestAnimationFrame(function () {
+                      scanScheduled = false;
+                      scheduledRoots.forEach(function (includeChildren, root) {
+                        applyBlockedControls(root, includeChildren);
+                      });
+                      scheduledRoots.clear();
                     });
                   });
                   observer.observe(document.body, {
@@ -218,11 +244,8 @@
                   });
                   return observer;
                 };
-                watchControls(/\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i, false);
-                if (isStudent) {
-                  window.ZoomMtg.showMeetingHeader({ show: false });
-                  watchControls(/\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i, true);
-                }
+                if (isStudent) window.ZoomMtg.showMeetingHeader({ show: false });
+                watchControls(blockedControlPatterns, isStudent);
                 postClassroomEvent('joined');
               },
               error: handleJoinError,
