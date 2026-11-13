@@ -31,14 +31,12 @@
     html.student-mode button[aria-label*="start video" i],html.student-mode button[aria-label*="stop video" i],
     html.student-mode button[aria-label*="camera" i],html.student-mode button[title*="camera" i],
     html.student-mode button[aria-label*="share screen" i],html.student-mode button[title*="share screen" i],
-    html.student-mode button[aria-label*="participant" i],html.student-mode button[title*="participant" i],
     html.student-mode button[aria-label*="record" i],html.student-mode button[title*="record" i],
     html.student-mode button[aria-label*="reaction" i],html.student-mode button[title*="reaction" i],
     html.student-mode button[aria-label*="poll" i],html.student-mode button[title*="poll" i],
     html.student-mode button[aria-label*="breakout" i],html.student-mode button[title*="breakout" i],
     html.student-mode button[aria-label*="caption" i],html.student-mode button[title*="caption" i],
-    html.student-mode button[aria-label*="whiteboard" i],html.student-mode button[title*="whiteboard" i],
-    html.student-mode button[aria-label="More" i],html.student-mode button[title="More" i] { display:none !important }
+    html.student-mode button[aria-label*="whiteboard" i],html.student-mode button[title*="whiteboard" i] { display:none !important }
   </style>
 </head>
 <body>
@@ -122,7 +120,6 @@
         disableReport: isStudent,
         disablePreview: true,
         showMeetingHeader: !isStudent,
-        showPureSharingContent: isStudent,
         meetingInfo: isStudent ? ['topic'] : ['topic', 'host', 'participant'],
         isSupportAV: true,
         isSupportChat: true,
@@ -185,7 +182,7 @@
                   /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
                 ];
                 if (isStudent) {
-                  blockedControlPatterns.push(/\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|participants|invite|record|reaction|poll|breakout|caption|whiteboard|more)\b/i);
+                  blockedControlPatterns.push(/\b(mute|unmute|audio|microphone|start video|stop video|camera|share screen|invite|record|reaction|poll|breakout|caption|whiteboard)\b/i);
                 }
                 var watchControls = function (blockedPatterns, preserveChatAndLeave) {
                   var applyBlockedControls = function (root, includeChildren) {
