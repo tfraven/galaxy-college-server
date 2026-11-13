@@ -7,12 +7,66 @@
   <link rel="preconnect" href="https://source.zoom.us" crossorigin>
   <title>Galaxy College Live Class</title>
   <style>
-    html,body{margin:0;width:100%;height:100%;min-height:100%;background:#0b1220;color:#e2e8f0;font:15px Arial,sans-serif;overflow:hidden}
-    body{min-height:100dvh;overscroll-behavior:none}
-    #status{position:fixed;z-index:10000;top:max(12px,env(safe-area-inset-top,12px));left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 32px));display:grid;place-items:center;text-align:center;padding:12px 16px;box-sizing:border-box;background:rgba(11,18,32,.94);border:1px solid #334155;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.35);pointer-events:none}
-    #status>div{max-width:520px}#detail{color:#94a3b8;line-height:1.5;margin-top:9px}
-    #zmmtg-root{position:fixed!important;inset:0!important;display:block!important;width:100vw!important;height:100dvh!important;min-height:0!important;max-width:100vw!important;overflow:hidden!important}
-    #zmmtg-root>*{max-width:100vw!important}
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+      background: #0b1220;
+      color: #e2e8f0;
+      font: 15px Arial, sans-serif;
+      overflow: hidden
+    }
+
+    body {
+      min-height: 100dvh;
+      overscroll-behavior: none
+    }
+
+    #status {
+      position: fixed;
+      z-index: 10000;
+      top: max(12px, env(safe-area-inset-top, 12px));
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(520px, calc(100% - 32px));
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 12px 16px;
+      box-sizing: border-box;
+      background: rgba(11, 18, 32, .94);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
+      pointer-events: none
+    }
+
+    #status>div {
+      max-width: 520px
+    }
+
+    #detail {
+      color: #94a3b8;
+      line-height: 1.5;
+      margin-top: 9px
+    }
+
+    /* Only pin the root to the viewport. Zoom sizes/positions its own video + share canvases, so do not
+       force display or max-width on its children (that collapsed the host video / shared screen). */
+    #zmmtg-root {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden
+    }
+
     button[aria-label*="invite" i],
     button[title*="invite" i],
     [role="button"][aria-label*="invite" i],
@@ -21,27 +75,64 @@
     a[href*="/w/"] {
       display: none !important
     }
-    @media(max-width:600px){
-      html,body{font-size:14px}
-      #status{top:max(8px,env(safe-area-inset-top,8px));width:calc(100% - 20px);padding:10px 12px;border-radius:10px}
-      #detail{font-size:13px;line-height:1.4;margin-top:6px}
+
+    @media(max-width:600px) {
+
+      html,
+      body {
+        font-size: 14px
+      }
+
+      #status {
+        top: max(8px, env(safe-area-inset-top, 8px));
+        width: calc(100% - 20px);
+        padding: 10px 12px;
+        border-radius: 10px
+      }
+
+      #detail {
+        font-size: 13px;
+        line-height: 1.4;
+        margin-top: 6px
+      }
     }
-    @media(orientation:landscape) and (max-height:500px){
-      #status{top:4px;padding:6px 10px}
-      #status>div{font-size:12px}
-      #detail{font-size:11px;margin-top:3px}
+
+    @media(orientation:landscape) and (max-height:500px) {
+      #status {
+        top: 4px;
+        padding: 6px 10px
+      }
+
+      #status>div {
+        font-size: 12px
+      }
+
+      #detail {
+        font-size: 11px;
+        margin-top: 3px
+      }
     }
+
     /* Restrict student from broadcasting camera/mic/share, while preserving viewing, pinning, and speaker audio */
-    html.student-mode button[aria-label*="unmute" i]:not([aria-label*="join" i]),
-    html.student-mode button[aria-label*="start video" i],
-    html.student-mode button[aria-label*="camera" i]:not([aria-label*="join" i]):not([aria-label*="view" i]),
-    html.student-mode button[aria-label*="share screen" i],html.student-mode button[title*="share screen" i],
-    html.student-mode button[aria-label*="record" i],html.student-mode button[title*="record" i],
-    html.student-mode button[aria-label*="reaction" i],html.student-mode button[title*="reaction" i],
-    html.student-mode button[aria-label*="poll" i],html.student-mode button[title*="poll" i],
-    html.student-mode button[aria-label*="breakout" i],html.student-mode button[title*="breakout" i],
-    html.student-mode button[aria-label*="caption" i],html.student-mode button[title*="caption" i],
-    html.student-mode button[aria-label*="whiteboard" i],html.student-mode button[title*="whiteboard" i] { display:none !important }
+    html.student-mode #wc-footer button[aria-label*="unmute" i]:not([aria-label*="join" i]),
+    html.student-mode #wc-footer button[aria-label*="start video" i],
+    html.student-mode #wc-footer button[aria-label*="camera" i]:not([aria-label*="join" i]):not([aria-label*="view" i]),
+    html.student-mode #wc-footer button[aria-label*="share screen" i],
+    html.student-mode #wc-footer button[title*="share screen" i],
+    html.student-mode #wc-footer button[aria-label*="record" i],
+    html.student-mode #wc-footer button[title*="record" i],
+    html.student-mode #wc-footer button[aria-label*="reaction" i],
+    html.student-mode #wc-footer button[title*="reaction" i],
+    html.student-mode #wc-footer button[aria-label*="poll" i],
+    html.student-mode #wc-footer button[title*="poll" i],
+    html.student-mode #wc-footer button[aria-label*="breakout" i],
+    html.student-mode #wc-footer button[title*="breakout" i],
+    html.student-mode #wc-footer button[aria-label*="caption" i],
+    html.student-mode #wc-footer button[title*="caption" i],
+    html.student-mode #wc-footer button[aria-label*="whiteboard" i],
+    html.student-mode #wc-footer button[title*="whiteboard" i] {
+      display: none !important
+    }
   </style>
 </head>
 
@@ -62,10 +153,10 @@
   <script defer src="https://source.zoom.us/zoom-meeting-6.10.0.min.js"></script>
   <script>
     window.addEventListener('DOMContentLoaded', function () {
-    (function () {
-      var message = document.getElementById('message');
-      var detail = document.getElementById('detail');
-      var status = document.getElementById('status');
+      (function () {
+        var message = document.getElementById('message');
+        var detail = document.getElementById('detail');
+        var status = document.getElementById('status');
         var values = new URLSearchParams(window.location.hash.slice(1));
         var signature = values.get('j');
         var meetingNumber = values.get('m');
@@ -75,7 +166,7 @@
         var isHost = values.get('h') === '1';
         var requestedMode = values.get('r');
         var isStudent = !isHost && requestedMode !== 'participant';
-      var joinWithAudio = values.get('a') !== '0';
+        var joinWithAudio = values.get('a') !== '0';
 
         if (isStudent) {
           document.documentElement.classList.add('student-mode');
@@ -118,209 +209,222 @@
           return;
         }
 
-      window.history.replaceState(null, '', window.location.pathname);
-      window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
-      window.ZoomMtg.preLoadWasm();
-      window.ZoomMtg.prepareWebSDK();
-      window.ZoomMtg.init({
-        leaveUrl: leftUrl,
-        patchJsMedia: true,
-        disableInvite: true,
-        disableRecord: true,
-        disableCallOut: isStudent,
-        disableZoomPhone: isStudent,
-        disableReport: isStudent,
-        disablePreview: true,
-        disableJoinAudio: !joinWithAudio,
-        showMeetingHeader: true,
-        meetingInfo: isStudent ? ['topic', 'host'] : ['topic', 'host', 'participant'],
-        isSupportAV: true,
-        isSupportChat: true,
-        isSupportQA: !isStudent,
-        isSupportPolling: !isStudent,
-        isSupportBreakout: !isStudent,
-        isSupportCC: !isStudent,
-        isSupportNonverbal: !isStudent,
-        screenShare: true,
-        sharingMode: 'fit',
-        success: function () {
-          message.textContent = 'Joining the Zoom meeting…';
-          detail.textContent = 'Waiting for Zoom to connect you to the class.';
-          var joinFinished = false;
-          function handleJoinError(error) {
-            if (joinFinished) return;
-            joinFinished = true;
-            window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
-            var errorCode = Number(error && (error.errorCode || error.code));
-            message.textContent = 'Could not join the Zoom meeting.';
-            detail.textContent = errorCode === 4011
-              ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app.'
-              : (errorCode === 3051 || errorCode === 3052)
-                ? 'Zoom is requiring account sign-in. Ask the Zoom account admin to disable the meeting authentication requirement for this host account.'
-              : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
-            console.error('[classroom] Zoom join failed', {
-              errorCode: errorCode || undefined,
-              reason: error && error.reason,
-              message: error && error.message,
-            });
-            postClassroomEvent('error', detail.textContent);
-          }
-          function handleUnhandledJoinRejection(event) {
-            if (joinFinished) return;
-            var error = event && event.reason;
-            var errorCode = Number(error && (error.errorCode || error.code));
-            if (errorCode !== 4011 && (!error || error.type !== 'JOIN_MEETING_FAILED')) return;
-            event.preventDefault();
-            handleJoinError(error);
-          }
+        window.history.replaceState(null, '', window.location.pathname);
+        window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
+        try {
+          console.info('[classroom] env', {
+            crossOriginIsolated: window.crossOriginIsolated === true,
+            sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+            webCodecs: typeof VideoDecoder !== 'undefined',
+            offscreenCanvas: typeof OffscreenCanvas !== 'undefined',
+            requirements: window.ZoomMtg.checkFeatureRequirements && window.ZoomMtg.checkFeatureRequirements(),
+          });
+        } catch (e) { }
+        window.ZoomMtg.preLoadWasm();
+        window.ZoomMtg.prepareWebSDK();
+        window.ZoomMtg.init({
+          leaveUrl: leftUrl,
+          patchJsMedia: true,
+          disableInvite: true,
+          disableRecord: true,
+          disableCallOut: isStudent,
+          disableZoomPhone: isStudent,
+          disableReport: isStudent,
+          disablePreview: true,
+          disableJoinAudio: !joinWithAudio,
+          showMeetingHeader: true,
+          meetingInfo: isStudent ? ['topic', 'host'] : ['topic', 'host', 'participant'],
+          isSupportAV: true,
+          isSupportChat: true,
+          isSupportQA: !isStudent,
+          isSupportPolling: !isStudent,
+          isSupportBreakout: !isStudent,
+          isSupportCC: !isStudent,
+          isSupportNonverbal: !isStudent,
+          screenShare: true,
+          sharingMode: 'fit',
+          defaultView: 'speaker',
+          success: function () {
+            message.textContent = 'Joining the Zoom meeting…';
+            detail.textContent = 'Waiting for Zoom to connect you to the class.';
+            var joinFinished = false;
+            function handleJoinError(error) {
+              if (joinFinished) return;
+              joinFinished = true;
+              window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
+              var errorCode = Number(error && (error.errorCode || error.code));
+              message.textContent = 'Could not join the Zoom meeting.';
+              detail.textContent = errorCode === 4011
+                ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app.'
+                : (errorCode === 3051 || errorCode === 3052)
+                  ? 'Zoom is requiring account sign-in. Ask the Zoom account admin to disable the meeting authentication requirement for this host account.'
+                  : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
+              console.error('[classroom] Zoom join failed', {
+                errorCode: errorCode || undefined,
+                reason: error && error.reason,
+                message: error && error.message,
+              });
+              postClassroomEvent('error', detail.textContent);
+            }
+            function handleUnhandledJoinRejection(event) {
+              if (joinFinished) return;
+              var error = event && event.reason;
+              var errorCode = Number(error && (error.errorCode || error.code));
+              if (errorCode !== 4011 && (!error || error.type !== 'JOIN_MEETING_FAILED')) return;
+              event.preventDefault();
+              handleJoinError(error);
+            }
 
-          window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
-          try {
-            var joinResult = window.ZoomMtg.join({
-              signature: signature,
-              meetingNumber: meetingNumber,
-              passWord: password,
-              userName: userName,
-              zak: zak,
-              success: function () {
-                if (joinFinished) return;
-                joinFinished = true;
-                window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
-                status.style.display = 'none';
-                document.getElementById('zmmtg-root').style.display = 'block';
-                window.ZoomMtg.showInviteFunction({ show: false });
-                window.ZoomMtg.showRecordFunction({ show: false });
+            window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
+            try {
+              var joinResult = window.ZoomMtg.join({
+                signature: signature,
+                meetingNumber: meetingNumber,
+                passWord: password,
+                userName: userName,
+                zak: zak,
+                success: function () {
+                  if (joinFinished) return;
+                  joinFinished = true;
+                  window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
+                  status.style.display = 'none';
+                  document.getElementById('zmmtg-root').style.display = 'block';
+                  window.ZoomMtg.showInviteFunction({ show: false });
+                  window.ZoomMtg.showRecordFunction({ show: false });
 
-                // Allow pinning so student can pin any presenter (teacher, operator, admin)
-                try {
-                  window.ZoomMtg.allowMultiPin({ allow: true });
-                } catch (e) {}
-
-                // Automatically pin the host / instructor video for students so it is maximized
-                function autoPinHost() {
-                  if (!isStudent || !window.ZoomMtg.getAttendeeslist) return;
+                  // Allow pinning so student can pin any presenter (teacher, operator, admin)
                   try {
-                    window.ZoomMtg.getAttendeeslist({
-                      success: function (res) {
-                        var attendees = res && res.result && res.result.attendeeList;
-                        if (!Array.isArray(attendees)) return;
-                        var hostUser = attendees.find(function (a) { return a.isHost; }) ||
-                                       attendees.find(function (a) { return a.bVideoOn; });
-                        if (hostUser && hostUser.userId) {
-                          try {
-                            window.ZoomMtg.operatePin({ userId: hostUser.userId, operate: 'add' });
-                            window.ZoomMtg.operatePin({ oderId: hostUser.userId, action: 'add' });
-                          } catch (err) {}
+                    window.ZoomMtg.allowMultiPin({ allow: true });
+                  } catch (e) { }
+
+                  // Automatically pin the host / instructor video for students so it is maximized
+                  function autoPinHost() {
+                    if (!isStudent || !window.ZoomMtg.getAttendeeslist) return;
+                    try {
+                      window.ZoomMtg.getAttendeeslist({
+                        success: function (res) {
+                          var attendees = res && res.result && res.result.attendeeList;
+                          if (!Array.isArray(attendees)) return;
+                          var hostUser = attendees.find(function (a) { return a.isHost; }) ||
+                            attendees.find(function (a) { return a.bVideoOn; });
+                          if (hostUser && hostUser.userId) {
+                            try {
+                              window.ZoomMtg.operatePin({ userId: hostUser.userId, operate: 'add' });
+                              window.ZoomMtg.operatePin({ oderId: hostUser.userId, action: 'add' });
+                            } catch (err) { }
+                          }
+                        }
+                      });
+                    } catch (e) { }
+                  }
+
+                  // Auto-join speaker audio if requested
+                  if (joinWithAudio) {
+                    var audioAttempts = 0;
+                    var audioInterval = setInterval(function () {
+                      audioAttempts++;
+                      var buttons = document.querySelectorAll('button, [role="button"]');
+                      for (var i = 0; i < buttons.length; i++) {
+                        var btn = buttons[i];
+                        var text = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '')).toLowerCase();
+                        if (text.includes('computer audio') || text.includes('join audio') || text.includes('join with computer audio')) {
+                          btn.click();
+                          clearInterval(audioInterval);
+                          return;
                         }
                       }
-                    });
-                  } catch (e) {}
-                }
+                      if (audioAttempts > 20) clearInterval(audioInterval);
+                    }, 400);
+                  }
 
-                // Auto-join speaker audio if requested
-                if (joinWithAudio) {
-                  var audioAttempts = 0;
-                  var audioInterval = setInterval(function () {
-                    audioAttempts++;
-                    var buttons = document.querySelectorAll('button, [role="button"]');
-                    for (var i = 0; i < buttons.length; i++) {
-                      var btn = buttons[i];
-                      var text = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '')).toLowerCase();
-                      if (text.includes('computer audio') || text.includes('join audio') || text.includes('join with computer audio')) {
-                        btn.click();
-                        clearInterval(audioInterval);
-                        return;
+                  setTimeout(autoPinHost, 1500);
+
+                  var controlSelector = 'button,[role="button"],a';
+                  var blockedControlPatterns = [
+                    /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
+                  ];
+                  if (isStudent) {
+                    blockedControlPatterns.push(/\b(unmute|start video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
+                  }
+                  var watchControls = function (blockedPatterns, preserveChatAndLeave) {
+                    var applyBlockedControls = function (root, includeChildren) {
+                      if (!root || root.nodeType !== 1) return;
+                      var candidates = new Set();
+                      if (root.matches && root.matches(controlSelector)) candidates.add(root);
+                      if (includeChildren && root.querySelectorAll) {
+                        root.querySelectorAll(controlSelector).forEach(function (control) { candidates.add(control); });
                       }
-                    }
-                    if (audioAttempts > 20) clearInterval(audioInterval);
-                  }, 400);
-                }
-
-                setTimeout(autoPinHost, 1500);
-
-                var controlSelector = 'button,[role="button"],a';
-                var blockedControlPatterns = [
-                  /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
-                ];
-                if (isStudent) {
-                  blockedControlPatterns.push(/\b(unmute|start video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
-                }
-                var watchControls = function (blockedPatterns, preserveChatAndLeave) {
-                  var applyBlockedControls = function (root, includeChildren) {
-                    if (!root || root.nodeType !== 1) return;
-                    var candidates = new Set();
-                    var closest = root.closest && root.closest(controlSelector);
-                    if (closest) candidates.add(closest);
-                    if (root.matches && root.matches(controlSelector)) candidates.add(root);
-                    if (includeChildren && root.querySelectorAll) {
-                      root.querySelectorAll(controlSelector).forEach(function (control) { candidates.add(control); });
-                    }
-                    candidates.forEach(function (control) {
-                      var label = [
-                        control.getAttribute('aria-label'),
-                        control.getAttribute('title'),
-                        control.getAttribute('data-tooltip'),
-                        control.textContent,
-                        control.getAttribute('href')
-                      ].filter(Boolean).join(' ').trim();
-                      var shouldHide = blockedPatterns.some(function (blocked, index) {
-                        if (preserveChatAndLeave && index > 0 && /\b(chat|leave|join audio|computer audio|audio|view|pin|gallery|speaker)\b/i.test(label)) return false;
-                        return blocked.test(label);
+                      candidates.forEach(function (control) {
+                        // Never hide anything that renders media or is a large layout container:
+                        // the host's video tile and the shared screen live inside such elements.
+                        if (control.querySelector('video,canvas,img')) return;
+                        if (control.offsetHeight > 120 || control.offsetWidth > 320) return;
+                        // Match on the control's own accessible name only, not on descendant text.
+                        var label = [
+                          control.getAttribute('aria-label'),
+                          control.getAttribute('title'),
+                          control.getAttribute('data-tooltip'),
+                          control.getAttribute('href')
+                        ].filter(Boolean).join(' ').trim();
+                        if (!label) return;
+                        var shouldHide = blockedPatterns.some(function (blocked, index) {
+                          if (preserveChatAndLeave && index > 0 && /\b(chat|leave|join audio|computer audio|audio|view|pin|gallery|speaker|share)\b/i.test(label) && !/share screen/i.test(label)) return false;
+                          return blocked.test(label);
+                        });
+                        if (shouldHide) {
+                          control.style.setProperty('display', 'none', 'important');
+                        }
                       });
-                      if (shouldHide) {
-                        control.style.setProperty('display', 'none', 'important');
-                      }
+                    };
+                    applyBlockedControls(document.body, true);
+                    var scheduledRoots = new Map();
+                    var scanScheduled = false;
+                    var observer = new MutationObserver(function (changes) {
+                      changes.forEach(function (change) {
+                        if (change.target && change.target.nodeType === 1 && !scheduledRoots.has(change.target)) {
+                          scheduledRoots.set(change.target, false);
+                        }
+                        change.addedNodes && change.addedNodes.forEach(function (node) {
+                          if (node.nodeType === 1) scheduledRoots.set(node, true);
+                        });
+                      });
+                      if (scanScheduled || scheduledRoots.size === 0) return;
+                      scanScheduled = true;
+                      window.requestAnimationFrame(function () {
+                        scanScheduled = false;
+                        scheduledRoots.forEach(function (includeChildren, root) {
+                          applyBlockedControls(root, includeChildren);
+                        });
+                        scheduledRoots.clear();
+                      });
                     });
+                    observer.observe(document.body, {
+                      childList: true,
+                      subtree: true,
+                      attributes: true,
+                      attributeFilter: ['aria-label', 'title', 'data-tooltip', 'href']
+                    });
+                    return observer;
                   };
-                  applyBlockedControls(document.body, true);
-                  var scheduledRoots = new Map();
-                  var scanScheduled = false;
-                  var observer = new MutationObserver(function (changes) {
-                    changes.forEach(function (change) {
-                      if (change.target && change.target.nodeType === 1 && !scheduledRoots.has(change.target)) {
-                        scheduledRoots.set(change.target, false);
-                      }
-                      change.addedNodes && change.addedNodes.forEach(function (node) {
-                        if (node.nodeType === 1) scheduledRoots.set(node, true);
-                      });
-                    });
-                    if (scanScheduled || scheduledRoots.size === 0) return;
-                    scanScheduled = true;
-                    window.requestAnimationFrame(function () {
-                      scanScheduled = false;
-                      scheduledRoots.forEach(function (includeChildren, root) {
-                        applyBlockedControls(root, includeChildren);
-                      });
-                      scheduledRoots.clear();
-                    });
-                  });
-                  observer.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    attributeFilter: ['aria-label', 'title', 'data-tooltip', 'href']
-                  });
-                  return observer;
-                };
-                watchControls(blockedControlPatterns, isStudent);
-                postClassroomEvent('joined');
-              },
-              error: handleJoinError,
-            });
-            if (joinResult && typeof joinResult.catch === 'function') {
-              joinResult.catch(handleJoinError);
+                  watchControls(blockedControlPatterns, isStudent);
+                  postClassroomEvent('joined');
+                },
+                error: handleJoinError,
+              });
+              if (joinResult && typeof joinResult.catch === 'function') {
+                joinResult.catch(handleJoinError);
+              }
+            } catch (error) {
+              handleJoinError(error);
             }
-          } catch (error) {
-            handleJoinError(error);
-          }
-        },
-        error: function (error) {
-          message.textContent = 'Could not start the Zoom meeting.';
-          detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
-          postClassroomEvent('error', detail.textContent);
-        },
-      });
-    }());
+          },
+          error: function (error) {
+            message.textContent = 'Could not start the Zoom meeting.';
+            detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
+            postClassroomEvent('error', detail.textContent);
+          },
+        });
+      }());
     }, { once: true });
   </script>
 </body>
