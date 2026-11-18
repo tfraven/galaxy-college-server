@@ -535,7 +535,8 @@
                         }
                       });
                     };
-                    applyBlockedControls(document.body, true);
+                    var controlRoot = document.getElementById('wc-footer') || document.getElementById('zmmtg-root') || document.body;
+                    applyBlockedControls(controlRoot, true);
                     var scheduledRoots = new Map();
                     var scanScheduled = false;
                     var observer = new MutationObserver(function (changes) {
@@ -557,7 +558,7 @@
                         scheduledRoots.clear();
                       });
                     });
-                    observer.observe(document.body, {
+                    observer.observe(controlRoot, {
                       childList: true,
                       subtree: true,
                       attributes: true,
