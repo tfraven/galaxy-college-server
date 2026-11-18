@@ -4,8 +4,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script>window.__galaxyNavStart = performance.now();</script>
   <link rel="preconnect" href="https://source.zoom.us" crossorigin>
   <link rel="preconnect" href="https://dmogdx0jrul3u.cloudfront.net" crossorigin>
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/react.min.js">
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/react-dom.min.js">
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/redux.min.js">
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/redux-thunk.min.js">
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/react-redux.min.js">
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/lodash.min.js">
+  <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/zoom-meeting-6.10.0.min.js">
   <title>Galaxy College Live Class</title>
   <style>
     html,
@@ -184,8 +192,9 @@
         base + '/lib/vendor/react-redux.min.js',
         base + '/lib/vendor/lodash.min.js',
       ];
-      return Promise.all(dependencies.map(loadZoomScript))
-        .then(function () { return loadZoomScript(base + '/zoom-meeting-6.10.0.min.js'); });
+      dependencies.push(base + '/zoom-meeting-6.10.0.min.js');
+      // Start the large meeting bundle with its vendors. async=false keeps execution in the required order.
+      return Promise.all(dependencies.map(loadZoomScript));
     }
 
     window.addEventListener('DOMContentLoaded', function () {
@@ -194,6 +203,28 @@
         var detail = document.getElementById('detail');
         var status = document.getElementById('status');
         var values = new URLSearchParams(window.location.hash.slice(1));
+        var navStart = window.__galaxyNavStart || performance.now();
+        function zoomResourceTimings() {
+          return performance.getEntriesByType('resource')
+            .filter(function (entry) {
+              return entry.name.indexOf('source.zoom.us/6.10.0/') >= 0 ||
+                entry.name.indexOf('dmogdx0jrul3u.cloudfront.net') >= 0;
+            })
+            .map(function (entry) {
+              var path;
+              try { path = new URL(entry.name).pathname; } catch (error) { path = 'Zoom media asset'; }
+              return {
+                path: path,
+                ms: Math.round(entry.duration),
+                start: Math.round(entry.startTime),
+                bytes: entry.transferSize || 0,
+              };
+            });
+        }
+        function markTiming(name, details) {
+          console.info('[classroom-timing] ' + name + ' +' + Math.round(performance.now() - navStart) + 'ms' +
+            (details ? ' ' + JSON.stringify(details) : ''));
+        }
         var signature = values.get('j');
         var meetingNumber = values.get('m');
         var password = values.get('p') || '';
@@ -226,33 +257,53 @@
           } catch (error) { }
         }
 
+        var meetingJoined = false;
+        var pendingPanel = null;
+        function findZoomControl(panel) {
+          var root = document.getElementById('wc-footer') || document.getElementById('zmmtg-root') || document;
+          var controls = root.querySelectorAll('button,[role="button"]');
+          var pattern = panel === 'chat' ? /\bchat\b/i : /\bmore(?:\s+options)?\b/i;
+          for (var i = 0; i < controls.length; i++) {
+            var element = controls[i];
+            if (!element || !element.getClientRects().length || element.disabled || element.getAttribute('aria-disabled') === 'true') continue;
+            var label = [
+              element.getAttribute('aria-label'),
+              element.getAttribute('title'),
+              element.getAttribute('data-tooltip'),
+              element.innerText,
+              element.textContent,
+            ].filter(Boolean).join(' ').trim().toLowerCase().replace(/\s+/g, ' ');
+            if (pattern.test(label)) return { element: element, label: label };
+          }
+          return null;
+        }
+        function deliverZoomPanel(panel, attemptsLeft) {
+          var match = findZoomControl(panel);
+          if (match) {
+            match.element.click();
+            markTiming('panel-open', { panel: panel, label: match.label.slice(0, 60) });
+            return;
+          }
+          if (attemptsLeft > 0) {
+            window.setTimeout(function () { deliverZoomPanel(panel, attemptsLeft - 1); }, 200);
+            return;
+          }
+          postClassroomEvent('control-error', panel === 'chat'
+            ? 'Zoom chat is not available in this class.'
+            : 'More Zoom controls are not available yet.');
+        }
+
         // The Android shell provides 48dp controls for the Zoom panels. Trigger the matching
         // visible SDK control so users don't have to reach the embedded footer at the screen edge.
         window.GalaxyClassroomUi = {
           openPanel: function (panel) {
-            var chat = panel === 'chat';
-            var controls = Array.prototype.slice.call(document.querySelectorAll(
-              '#wc-footer button, #wc-footer [role="button"], button, [role="button"]'
-            ));
-            var control = controls.find(function (element) {
-              if (!element || !element.getClientRects().length || element.disabled || element.getAttribute('aria-disabled') === 'true') {
-                return false;
-              }
-              var label = [
-                element.getAttribute('aria-label'),
-                element.getAttribute('title'),
-                element.getAttribute('data-tooltip'),
-                element.innerText,
-              ].filter(Boolean).join(' ').trim().toLowerCase().replace(/\s+/g, ' ');
-              return chat
-                ? (label === 'chat' || label.indexOf('open chat') >= 0)
-                : (label === 'more' || label.indexOf('more options') >= 0);
-            });
-            if (!control) {
-              postClassroomEvent('control-error', chat ? 'Chat is not available yet.' : 'More options are not available yet.');
-              return false;
+            if (panel !== 'chat' && panel !== 'more') return false;
+            if (!meetingJoined) {
+              pendingPanel = panel;
+              postClassroomEvent('status', 'Zoom is finishing the connection…');
+              return true;
             }
-            control.click();
+            deliverZoomPanel(panel, 15);
             return true;
           },
         };
@@ -296,7 +347,10 @@
         message.textContent = 'Preparing audio and video…';
         detail.textContent = 'Zoom loaded. Preparing the secure media connection.';
         postClassroomEvent('status', message.textContent);
-        console.info('[classroom] Zoom SDK loaded in', Math.round(performance.now() - zoomLoadStartedAt), 'ms');
+        markTiming('zoom-sdk-ready', {
+          loadMs: Math.round(performance.now() - zoomLoadStartedAt),
+          resources: zoomResourceTimings(),
+        });
         window.history.replaceState(null, '', window.location.pathname);
         window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
         try {
@@ -308,8 +362,13 @@
             requirements: window.ZoomMtg.checkFeatureRequirements && window.ZoomMtg.checkFeatureRequirements(),
           });
         } catch (e) { }
+        var wasmStartedAt = performance.now();
         window.ZoomMtg.preLoadWasm();
+        markTiming('wasm-preload-called', { callMs: Math.round(performance.now() - wasmStartedAt) });
+        var prepareStartedAt = performance.now();
         window.ZoomMtg.prepareWebSDK();
+        markTiming('prepare-called', { callMs: Math.round(performance.now() - prepareStartedAt) });
+        markTiming('zoom-init-start');
         window.ZoomMtg.init({
           leaveUrl: leftUrl,
           patchJsMedia: true,
@@ -333,6 +392,7 @@
           sharingMode: 'fit',
           defaultView: 'speaker',
           success: function () {
+            markTiming('zoom-init-success', { resources: zoomResourceTimings() });
             message.textContent = 'Joining the Zoom meeting…';
             detail.textContent = 'Waiting for Zoom to connect you to the class.';
             postClassroomEvent('status', message.textContent);
@@ -342,6 +402,7 @@
               joinFinished = true;
               window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
               var errorCode = Number(error && (error.errorCode || error.code));
+              markTiming('zoom-join-error', { code: errorCode || null });
               message.textContent = 'Could not join the Zoom meeting.';
                 status.classList.add('error');
               detail.textContent = errorCode === 4011
@@ -367,6 +428,7 @@
 
             window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
             try {
+              markTiming('zoom-join-start');
               var joinResult = window.ZoomMtg.join({
                 signature: signature,
                 meetingNumber: meetingNumber,
@@ -376,6 +438,13 @@
                 success: function () {
                   if (joinFinished) return;
                   joinFinished = true;
+                  meetingJoined = true;
+                  markTiming('zoom-join-success');
+                  if (pendingPanel) {
+                    var requestedPanel = pendingPanel;
+                    pendingPanel = null;
+                    deliverZoomPanel(requestedPanel, 15);
+                  }
                   window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
                   status.style.display = 'none';
                   document.getElementById('zmmtg-root').style.display = 'block';
@@ -509,6 +578,7 @@
             }
           },
           error: function (error) {
+            markTiming('zoom-init-error', { message: error && error.message ? error.message : 'unknown' });
             message.textContent = 'Could not start the Zoom meeting.';
             detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
             status.classList.add('error');
