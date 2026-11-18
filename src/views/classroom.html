@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="preconnect" href="https://source.zoom.us" crossorigin>
+  <link rel="preconnect" href="https://dmogdx0jrul3u.cloudfront.net" crossorigin>
   <title>Galaxy College Live Class</title>
   <style>
     html,
@@ -42,6 +43,21 @@
       box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
       pointer-events: none
     }
+
+    #status::before {
+      content: "";
+      width: 18px;
+      height: 18px;
+      margin-bottom: 10px;
+      border: 2px solid rgba(148, 163, 184, .32);
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: classroom-spin .8s linear infinite
+    }
+
+    #status.error::before { display: none }
+
+    @keyframes classroom-spin { to { transform: rotate(360deg) } }
 
     #status>div {
       max-width: 520px
@@ -137,23 +153,43 @@
 </head>
 
 <body>
-  <div id="status">
+  <div id="status" role="status" aria-live="polite">
     <div><strong id="message">Connecting to the Zoom meeting…</strong>
       <div id="detail">Joining your scheduled live class. Please wait.</div>
     </div>
   </div>
   <div id="zmmtg-root"></div>
   <div id="aria-notify-area"></div>
-  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react.min.js"></script>
-  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react-dom.min.js"></script>
-  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/redux.min.js"></script>
-  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/redux-thunk.min.js"></script>
-  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/react-redux.min.js"></script>
-  <script defer src="https://source.zoom.us/6.10.0/lib/vendor/lodash.min.js"></script>
-  <script defer src="https://source.zoom.us/zoom-meeting-6.10.0.min.js"></script>
   <script>
+    function loadZoomScript(src) {
+      return new Promise(function (resolve, reject) {
+        var script = document.createElement('script');
+        script.src = src;
+        // Dynamic scripts download in parallel but execute in insertion order.
+        script.async = false;
+        script.onload = resolve;
+        script.onerror = function () { reject(new Error('A Zoom media library could not be downloaded.')); };
+        document.head.appendChild(script);
+      });
+    }
+
+    function loadZoomSdk() {
+      if (window.ZoomMtg) return Promise.resolve();
+      var base = 'https://source.zoom.us/6.10.0';
+      var dependencies = [
+        base + '/lib/vendor/react.min.js',
+        base + '/lib/vendor/react-dom.min.js',
+        base + '/lib/vendor/redux.min.js',
+        base + '/lib/vendor/redux-thunk.min.js',
+        base + '/lib/vendor/react-redux.min.js',
+        base + '/lib/vendor/lodash.min.js',
+      ];
+      return Promise.all(dependencies.map(loadZoomScript))
+        .then(function () { return loadZoomScript(base + '/zoom-meeting-6.10.0.min.js'); });
+    }
+
     window.addEventListener('DOMContentLoaded', function () {
-      (function () {
+      (async function () {
         var message = document.getElementById('message');
         var detail = document.getElementById('detail');
         var status = document.getElementById('status');
@@ -190,6 +226,37 @@
           } catch (error) { }
         }
 
+        // The Android shell provides 48dp controls for the Zoom panels. Trigger the matching
+        // visible SDK control so users don't have to reach the embedded footer at the screen edge.
+        window.GalaxyClassroomUi = {
+          openPanel: function (panel) {
+            var chat = panel === 'chat';
+            var controls = Array.prototype.slice.call(document.querySelectorAll(
+              '#wc-footer button, #wc-footer [role="button"], button, [role="button"]'
+            ));
+            var control = controls.find(function (element) {
+              if (!element || !element.getClientRects().length || element.disabled || element.getAttribute('aria-disabled') === 'true') {
+                return false;
+              }
+              var label = [
+                element.getAttribute('aria-label'),
+                element.getAttribute('title'),
+                element.getAttribute('data-tooltip'),
+                element.innerText,
+              ].filter(Boolean).join(' ').trim().toLowerCase().replace(/\s+/g, ' ');
+              return chat
+                ? (label === 'chat' || label.indexOf('open chat') >= 0)
+                : (label === 'more' || label.indexOf('more options') >= 0);
+            });
+            if (!control) {
+              postClassroomEvent('control-error', chat ? 'Chat is not available yet.' : 'More options are not available yet.');
+              return false;
+            }
+            control.click();
+            return true;
+          },
+        };
+
         if (new URLSearchParams(window.location.search).has('left')) {
           message.textContent = 'You left the live class.';
           detail.textContent = 'Close this window to return to Galaxy College.';
@@ -199,16 +266,37 @@
         if (!signature || !meetingNumber || (isHost && !zak)) {
           message.textContent = 'Could not open this live class.';
           detail.textContent = 'The meeting details are missing or have expired. Return to the live classes page and join again.';
-          postClassroomEvent('error', detail.textContent);
-          return;
-        }
-        if (!window.ZoomMtg) {
-          message.textContent = 'Zoom Meeting SDK could not be loaded.';
-          detail.textContent = 'Check your connection and try again.';
+          status.classList.add('error');
           postClassroomEvent('error', detail.textContent);
           return;
         }
 
+        var zoomLoadStartedAt = performance.now();
+        message.textContent = 'Loading Zoom classroom…';
+        detail.textContent = 'Preparing the meeting tools. The first connection may take a little longer.';
+        postClassroomEvent('status', message.textContent);
+        try {
+          await loadZoomSdk();
+        } catch (error) {
+          message.textContent = 'Zoom Meeting SDK could not be loaded.';
+          detail.textContent = (error && error.message) || 'Check your connection and try again.';
+          status.classList.add('error');
+          postClassroomEvent('error', detail.textContent);
+          return;
+        }
+
+        if (!window.ZoomMtg) {
+          message.textContent = 'Zoom Meeting SDK could not be loaded.';
+          detail.textContent = 'Check your connection and try again.';
+          status.classList.add('error');
+          postClassroomEvent('error', detail.textContent);
+          return;
+        }
+
+        message.textContent = 'Preparing audio and video…';
+        detail.textContent = 'Zoom loaded. Preparing the secure media connection.';
+        postClassroomEvent('status', message.textContent);
+        console.info('[classroom] Zoom SDK loaded in', Math.round(performance.now() - zoomLoadStartedAt), 'ms');
         window.history.replaceState(null, '', window.location.pathname);
         window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
         try {
@@ -247,6 +335,7 @@
           success: function () {
             message.textContent = 'Joining the Zoom meeting…';
             detail.textContent = 'Waiting for Zoom to connect you to the class.';
+            postClassroomEvent('status', message.textContent);
             var joinFinished = false;
             function handleJoinError(error) {
               if (joinFinished) return;
@@ -254,6 +343,7 @@
               window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
               var errorCode = Number(error && (error.errorCode || error.code));
               message.textContent = 'Could not join the Zoom meeting.';
+                status.classList.add('error');
               detail.textContent = errorCode === 4011
                 ? 'Zoom error 4011: this meeting belongs to a different Zoom account than the Meeting SDK app.'
                 : (errorCode === 3051 || errorCode === 3052)
@@ -421,6 +511,7 @@
           error: function (error) {
             message.textContent = 'Could not start the Zoom meeting.';
             detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
+            status.classList.add('error');
             postClassroomEvent('error', detail.textContent);
           },
         });
