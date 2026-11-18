@@ -4,7 +4,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <script>window.__galaxyNavStart = performance.now();</script>
+  <script>
+    window.__galaxyNavStart = performance.now();
+    if (new URLSearchParams(window.location.hash.slice(1)).get('e') === '1') {
+      document.documentElement.classList.add('native-embedded');
+    }
+  </script>
   <link rel="preconnect" href="https://source.zoom.us" crossorigin>
   <link rel="preconnect" href="https://dmogdx0jrul3u.cloudfront.net" crossorigin>
   <link rel="preload" as="script" href="https://source.zoom.us/6.10.0/lib/vendor/react.min.js">
@@ -77,6 +82,24 @@
       margin-top: 9px
     }
 
+    /* Embedded Android renders the single loading state in Compose. */
+    html.native-embedded #status {
+      display: none !important
+    }
+
+    /* Zoom writes live announcements here; keep them available to assistive tech without showing raw text. */
+    #aria-notify-area {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      margin: -1px !important;
+      padding: 0 !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important
+    }
+
     /* Only pin the root to the viewport. Zoom sizes/positions its own video + share canvases, so do not
        force display or max-width on its children (that collapsed the host video / shared screen). */
     #zmmtg-root {
@@ -139,6 +162,13 @@
 
     /* Restrict student from broadcasting camera/mic/share, while preserving viewing, pinning, and speaker audio */
     html.student-mode #wc-footer button[aria-label*="unmute" i]:not([aria-label*="join" i]),
+    html.student-mode #wc-footer button[aria-label="video" i],
+    html.student-mode #wc-footer button[title="video" i],
+    html.student-mode #wc-footer button[data-tooltip="video" i],
+    html.student-mode #wc-footer [role="button"][aria-label="video" i],
+    html.student-mode #wc-footer [role="button"][title="video" i],
+    html.student-mode #wc-footer [role="button"][data-tooltip="video" i],
+    html.student-mode #wc-footer button[aria-label*="start video" i],
     html.student-mode #wc-footer button[aria-label*="start video" i],
     html.student-mode #wc-footer button[aria-label*="camera" i]:not([aria-label*="join" i]):not([aria-label*="view" i]),
     html.student-mode #wc-footer button[aria-label*="share screen" i],
@@ -262,10 +292,12 @@
         function findZoomControl(panel) {
           var root = document.getElementById('wc-footer') || document.getElementById('zmmtg-root') || document;
           var controls = root.querySelectorAll('button,[role="button"]');
-          var pattern = panel === 'chat' ? /\bchat\b/i : /\bmore(?:\s+options)?\b/i;
+          var best = null;
+          var bestScore = Infinity;
           for (var i = 0; i < controls.length; i++) {
             var element = controls[i];
-            if (!element || !element.getClientRects().length || element.disabled || element.getAttribute('aria-disabled') === 'true') continue;
+            if (!element || !element.getClientRects().length || element.disabled ||
+              element.getAttribute('aria-disabled') === 'true' || element.getAttribute('aria-hidden') === 'true') continue;
             var label = [
               element.getAttribute('aria-label'),
               element.getAttribute('title'),
@@ -273,9 +305,22 @@
               element.innerText,
               element.textContent,
             ].filter(Boolean).join(' ').trim().toLowerCase().replace(/\s+/g, ' ');
-            if (pattern.test(label)) return { element: element, label: label };
+            var style = window.getComputedStyle(element);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            var score;
+            if (panel === 'chat') {
+              if (!/\bchat\b/i.test(label)) continue;
+              score = label === 'chat' ? 0 : (/\b(open|panel)\b/i.test(label) ? 1 : 2);
+            } else {
+              if (!/\bmore\b/i.test(label) || /\b(audio|speaker|microphone|camera|video)\b/i.test(label)) continue;
+              score = label === 'more' ? 0 : (/\bmore options\b/i.test(label) ? 1 : 2);
+            }
+            if (score < bestScore) {
+              best = { element: element, label: label };
+              bestScore = score;
+            }
           }
-          return null;
+          return best;
         }
         function deliverZoomPanel(panel, attemptsLeft) {
           var match = findZoomControl(panel);
@@ -451,32 +496,6 @@
                   window.ZoomMtg.showInviteFunction({ show: false });
                   window.ZoomMtg.showRecordFunction({ show: false });
 
-                  // Allow pinning so student can pin any presenter (teacher, operator, admin)
-                  try {
-                    window.ZoomMtg.allowMultiPin({ allow: true });
-                  } catch (e) { }
-
-                  // Automatically pin the host / instructor video for students so it is maximized
-                  function autoPinHost() {
-                    if (!isStudent || !window.ZoomMtg.getAttendeeslist) return;
-                    try {
-                      window.ZoomMtg.getAttendeeslist({
-                        success: function (res) {
-                          var attendees = res && res.result && res.result.attendeeList;
-                          if (!Array.isArray(attendees)) return;
-                          var hostUser = attendees.find(function (a) { return a.isHost; }) ||
-                            attendees.find(function (a) { return a.bVideoOn; });
-                          if (hostUser && hostUser.userId) {
-                            try {
-                              window.ZoomMtg.operatePin({ userId: hostUser.userId, operate: 'add' });
-                              window.ZoomMtg.operatePin({ oderId: hostUser.userId, action: 'add' });
-                            } catch (err) { }
-                          }
-                        }
-                      });
-                    } catch (e) { }
-                  }
-
                   // Auto-join speaker audio if requested
                   if (joinWithAudio) {
                     var audioAttempts = 0;
@@ -496,14 +515,12 @@
                     }, 400);
                   }
 
-                  setTimeout(autoPinHost, 1500);
-
                   var controlSelector = 'button,[role="button"],a';
                   var blockedControlPatterns = [
                     /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
                   ];
                   if (isStudent) {
-                    blockedControlPatterns.push(/\b(unmute|start video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
+                    blockedControlPatterns.push(/\b(unmute|video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
                   }
                   var watchControls = function (blockedPatterns, preserveChatAndLeave) {
                     var applyBlockedControls = function (root, includeChildren) {
