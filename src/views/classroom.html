@@ -5,7 +5,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <script>
-    window.__galaxyNavStart = performance.now();
     if (new URLSearchParams(window.location.hash.slice(1)).get('e') === '1') {
       document.documentElement.classList.add('native-embedded');
     }
@@ -406,7 +405,7 @@
       }
     }
 
-    /* Keep student cameras and sharing disabled while allowing students to control their microphone. */
+    /* Student toolbar actions are reduced to audio, chat, participants, and leave. */
     html.student-mode #zmmtg-root button[aria-label*="video" i]:not([aria-label*="view" i]),
     html.student-mode #zmmtg-root button[title*="video" i]:not([title*="view" i]),
     html.student-mode #zmmtg-root button[data-tooltip*="video" i]:not([data-tooltip*="view" i]),
@@ -416,6 +415,9 @@
     html.student-mode #zmmtg-root button[aria-label*="camera" i]:not([aria-label*="join" i]):not([aria-label*="view" i]),
     html.student-mode #zmmtg-root button[aria-label*="share screen" i],
     html.student-mode #zmmtg-root button[title*="share screen" i],
+    html.student-mode #zmmtg-root button[aria-label*="share" i],
+    html.student-mode #zmmtg-root button[title*="share" i],
+    html.student-mode #zmmtg-root button[data-tooltip*="share" i],
     html.student-mode #zmmtg-root button[aria-label*="record" i],
     html.student-mode #zmmtg-root button[title*="record" i],
     html.student-mode #zmmtg-root button[aria-label*="reaction" i],
@@ -427,7 +429,14 @@
     html.student-mode #zmmtg-root button[aria-label*="caption" i],
     html.student-mode #zmmtg-root button[title*="caption" i],
     html.student-mode #zmmtg-root button[aria-label*="whiteboard" i],
-    html.student-mode #zmmtg-root button[title*="whiteboard" i] {
+    html.student-mode #zmmtg-root button[title*="whiteboard" i],
+    html.student-mode #zmmtg-root [role="button"][aria-label*="share" i],
+    html.student-mode #zmmtg-root [role="button"][title*="share" i],
+    html.student-mode #zmmtg-root [role="button"][data-tooltip*="share" i],
+    html.student-mode #zmmtg-root button[title*="whiteboard" i],
+    html.student-mode #zmmtg-root button[data-tooltip*="whiteboard" i],
+    html.student-mode #zmmtg-root [role="button"][title*="whiteboard" i],
+    html.student-mode #zmmtg-root [role="button"][data-tooltip*="whiteboard" i] {
       display: none !important
     }
   </style>
@@ -507,28 +516,6 @@
         var detail = document.getElementById('detail');
         var status = document.getElementById('status');
         var values = new URLSearchParams(window.location.hash.slice(1));
-        var navStart = window.__galaxyNavStart || performance.now();
-        function zoomResourceTimings() {
-          return performance.getEntriesByType('resource')
-            .filter(function (entry) {
-              return entry.name.indexOf('source.zoom.us/6.10.0/') >= 0 ||
-                entry.name.indexOf('dmogdx0jrul3u.cloudfront.net') >= 0;
-            })
-            .map(function (entry) {
-              var path;
-              try { path = new URL(entry.name).pathname; } catch (error) { path = 'Zoom media asset'; }
-              return {
-                path: path,
-                ms: Math.round(entry.duration),
-                start: Math.round(entry.startTime),
-                bytes: entry.transferSize || 0,
-              };
-            });
-        }
-        function markTiming(name, details) {
-          console.info('[classroom-timing] ' + name + ' +' + Math.round(performance.now() - navStart) + 'ms' +
-            (details ? ' ' + JSON.stringify(details) : ''));
-        }
         var signature = values.get('j');
         var meetingNumber = values.get('m');
         var password = values.get('p') || '';
@@ -985,10 +972,8 @@
         function openGalaxyPanel(panel) {
           if (panel === 'chat') {
             setZoomChatPanelOpen(true);
-            markTiming('panel-open', { panel: panel, source: 'Galaxy classroom chat' });
           } else {
             setZoomOptionsPanelOpen(true, 'more');
-            markTiming('panel-open', { panel: panel, source: 'Galaxy classroom options' });
           }
         }
 
@@ -1021,7 +1006,6 @@
           return;
         }
 
-        var zoomLoadStartedAt = performance.now();
         message.textContent = 'Loading Zoom classroom…';
         detail.textContent = 'Preparing the meeting tools. The first connection may take a little longer.';
         postClassroomEvent('status', message.textContent);
@@ -1046,40 +1030,10 @@
         message.textContent = 'Preparing audio and video…';
         detail.textContent = 'Zoom loaded. Preparing the secure media connection.';
         postClassroomEvent('status', message.textContent);
-        markTiming('zoom-sdk-ready', {
-          loadMs: Math.round(performance.now() - zoomLoadStartedAt),
-          resources: zoomResourceTimings(),
-        });
         window.history.replaceState(null, '', window.location.pathname);
         window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
-        try {
-          var featureRequirements = window.ZoomMtg.checkFeatureRequirements
-            ? window.ZoomMtg.checkFeatureRequirements()
-            : null;
-          var visualViewport = window.visualViewport;
-          console.info('[classroom] env ' + JSON.stringify({
-            crossOriginIsolated: window.crossOriginIsolated === true,
-            sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
-            webCodecs: typeof VideoDecoder !== 'undefined',
-            offscreenCanvas: typeof OffscreenCanvas !== 'undefined',
-            userAgent: navigator.userAgent,
-            viewport: {
-              width: window.innerWidth,
-              height: window.innerHeight,
-              visualWidth: visualViewport ? visualViewport.width : null,
-              visualHeight: visualViewport ? visualViewport.height : null,
-              visualScale: visualViewport ? visualViewport.scale : null,
-            },
-            requirements: featureRequirements,
-          }));
-        } catch (e) { }
-        var wasmStartedAt = performance.now();
         window.ZoomMtg.preLoadWasm();
-        markTiming('wasm-preload-called', { callMs: Math.round(performance.now() - wasmStartedAt) });
-        var prepareStartedAt = performance.now();
         window.ZoomMtg.prepareWebSDK();
-        markTiming('prepare-called', { callMs: Math.round(performance.now() - prepareStartedAt) });
-        markTiming('zoom-init-start');
         window.ZoomMtg.init({
           leaveUrl: leftUrl,
           patchJsMedia: true,
@@ -1099,17 +1053,17 @@
           isSupportBreakout: !isStudent,
           isSupportCC: !isStudent,
           isSupportNonverbal: !isStudent,
-          screenShare: true,
+          // The Zoom meeting API also restricts participants to host-only share;
+          // this disables Zoom's browser URL sharing path for students.
+          screenShare: !isStudent,
           sharingMode: 'fit',
           defaultView: 'speaker',
           success: function () {
-            markTiming('zoom-init-success', { resources: zoomResourceTimings() });
             if (document.documentElement.classList.contains('native-embedded') &&
               typeof window.ZoomMtg.inMeetingServiceListener === 'function') {
               try {
                 window.ZoomMtg.inMeetingServiceListener('onReceiveChatMsg', receiveZoomChatMessage);
               } catch (error) {
-                console.error('[classroom] Zoom chat listener could not be registered', error);
               }
             }
             message.textContent = 'Joining the Zoom meeting…';
@@ -1121,7 +1075,6 @@
               joinFinished = true;
               window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
               var errorCode = Number(error && (error.errorCode || error.code));
-              markTiming('zoom-join-error', { code: errorCode || null });
               message.textContent = 'Could not join the Zoom meeting.';
                 status.classList.add('error');
               detail.textContent = errorCode === 4011
@@ -1129,11 +1082,7 @@
                 : (errorCode === 3051 || errorCode === 3052)
                   ? 'Zoom is requiring account sign-in. Ask the Zoom account admin to disable the meeting authentication requirement for this host account.'
                   : (error && (error.reason || error.message)) || 'Check that the meeting is live and try again.';
-              console.error('[classroom] Zoom join failed', {
-                errorCode: errorCode || undefined,
-                reason: error && error.reason,
-                message: error && error.message,
-              });
+
               postClassroomEvent('error', detail.textContent);
             }
             function handleUnhandledJoinRejection(event) {
@@ -1147,7 +1096,6 @@
 
             window.addEventListener('unhandledrejection', handleUnhandledJoinRejection);
             try {
-              markTiming('zoom-join-start');
               var joinResult = window.ZoomMtg.join({
                 signature: signature,
                 meetingNumber: meetingNumber,
@@ -1158,7 +1106,6 @@
                   if (joinFinished) return;
                   joinFinished = true;
                   meetingJoined = true;
-                  markTiming('zoom-join-success');
                   if (pendingPanel) {
                     var requestedPanel = pendingPanel;
                     pendingPanel = null;
@@ -1174,10 +1121,8 @@
                   var blockedControlPatterns = [
                     /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
                   ];
-                  if (isStudent) {
-                    blockedControlPatterns.push(/\b(video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
-                  }
-                  var watchControls = function (blockedPatterns, preserveChatAndLeave) {
+                  var studentControlAllowlist = /\b(mute|unmute|chat|leave|participants?)\b/i;
+                  var watchControls = function (blockedPatterns) {
                     var applyBlockedControls = function (root, includeChildren) {
                       if (!root || root.nodeType !== 1) return;
                       var candidates = new Set();
@@ -1197,9 +1142,13 @@
                           control.getAttribute('data-tooltip'),
                           control.getAttribute('href')
                         ].filter(Boolean).join(' ').trim();
+                        var isStudentToolbarControl = isStudent && control.closest && control.closest('#wc-footer');
+                        if (isStudentToolbarControl && !studentControlAllowlist.test(label)) {
+                          control.style.setProperty('display', 'none', 'important');
+                          return;
+                        }
                         if (!label) return;
                         var shouldHide = blockedPatterns.some(function (blocked, index) {
-                          if (preserveChatAndLeave && index > 0 && /\b(chat|leave|join audio|computer audio|audio|view|pin|gallery|speaker|share)\b/i.test(label) && !/share screen/i.test(label)) return false;
                           return blocked.test(label);
                         });
                         if (shouldHide) {
@@ -1238,7 +1187,7 @@
                     });
                     return observer;
                   };
-                  watchControls(blockedControlPatterns, isStudent);
+                  watchControls(blockedControlPatterns);
                   postClassroomEvent('joined');
                 },
                 error: handleJoinError,
@@ -1251,7 +1200,6 @@
             }
           },
           error: function (error) {
-            markTiming('zoom-init-error', { message: error && error.message ? error.message : 'unknown' });
             message.textContent = 'Could not start the Zoom meeting.';
             detail.textContent = error && error.message ? error.message : 'Check your connection and try again.';
             status.classList.add('error');

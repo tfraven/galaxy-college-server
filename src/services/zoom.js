@@ -101,6 +101,8 @@ const meetingInput = ({ title, planStart, planEnd }) => ({
     mute_upon_entry: true,
     allow_host_control_participant_mute_state: true,
     request_permission_to_unmute_participants: false,
+    who_can_share_screen: 'host',
+    whiteboard: false,
     meeting_authentication: false,
     auto_recording: 'none',
     disable_recording_control: 'all',
