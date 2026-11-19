@@ -395,8 +395,7 @@
       }
     }
 
-    /* Restrict student from broadcasting camera/mic/share, while preserving viewing, pinning, and speaker audio */
-    html.student-mode #zmmtg-root button[aria-label*="unmute" i]:not([aria-label*="join" i]),
+    /* Keep student cameras and sharing disabled while allowing students to control their microphone. */
     html.student-mode #zmmtg-root button[aria-label*="video" i]:not([aria-label*="view" i]),
     html.student-mode #zmmtg-root button[title*="video" i]:not([title*="view" i]),
     html.student-mode #zmmtg-root button[data-tooltip*="video" i]:not([data-tooltip*="view" i]),
@@ -531,7 +530,7 @@
 
         if (isStudent) {
           document.documentElement.classList.add('student-mode');
-          detail.textContent = 'Camera and microphone are disabled. Use chat to message your teacher.';
+          detail.textContent = 'Your camera stays off. Your microphone starts muted; use Zoom’s Unmute control if you need to speak.';
         }
         var leftUrl = window.location.origin + window.location.pathname + '?left=1';
         function postClassroomEvent(name, messageText) {
@@ -1184,7 +1183,7 @@
                     /\binvite\b|copy\s+(?:meeting\s+)?(?:link|url)\b|meeting\s+link\b/i
                   ];
                   if (isStudent) {
-                    blockedControlPatterns.push(/\b(unmute|video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
+                    blockedControlPatterns.push(/\b(video|camera|share screen|invite|record|reaction|poll|breakout|whiteboard)\b/i);
                   }
                   var watchControls = function (blockedPatterns, preserveChatAndLeave) {
                     var applyBlockedControls = function (root, includeChildren) {
