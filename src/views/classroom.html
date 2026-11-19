@@ -100,10 +100,11 @@
       border: 0 !important
     }
 
-    /* Only pin the root to the viewport. Zoom sizes/positions its own video + share canvases, so do not
-       force display or max-width on its children (that collapsed the host video / shared screen). */
+    /* Keep the Zoom root viewport-sized without creating a fixed-position stacking context. Zoom
+       renders some chat UI in a portal; isolating this root can leave the portal backdrop above its
+       chat panel in Android WebView, so tapping Chat dims the meeting while hiding the panel. */
     #zmmtg-root {
-      position: fixed;
+      position: absolute;
       top: 0;
       left: 0;
       right: 0;
