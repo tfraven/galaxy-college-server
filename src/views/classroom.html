@@ -104,7 +104,10 @@
 
     #galaxy-zoom-chat {
       position: fixed;
-      inset: 0;
+      top: var(--galaxy-zoom-chat-top, 0px);
+      left: 0;
+      right: 0;
+      height: var(--galaxy-zoom-chat-height, 100%);
       z-index: 2147483647;
       display: flex;
       flex-direction: column;
@@ -112,7 +115,8 @@
       color: #f4f4f5;
       font: 14px Arial, sans-serif;
       padding-top: env(safe-area-inset-top, 0px);
-      box-sizing: border-box
+      box-sizing: border-box;
+      overflow: hidden
     }
 
     #galaxy-zoom-chat header {
@@ -120,6 +124,7 @@
       align-items: center;
       gap: 12px;
       min-height: 54px;
+      flex: 0 0 auto;
       padding: 0 16px;
       border-bottom: 1px solid rgba(255,255,255,.1);
       box-sizing: border-box
@@ -133,6 +138,16 @@
       background: transparent;
       color: #f4f4f5;
       font-size: 26px
+    }
+
+    #galaxy-zoom-chat-notifications {
+      min-width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 20px;
+      background: transparent;
+      color: #d4d4d8;
+      font-size: 18px
     }
 
     #galaxy-zoom-chat-heading { flex: 1; font-weight: 600 }
@@ -180,6 +195,7 @@
 
     #galaxy-zoom-chat-form {
       display: flex;
+      flex: 0 0 auto;
       gap: 8px;
       padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
       border-top: 1px solid rgba(255,255,255,.1);
@@ -214,6 +230,124 @@
 
     #galaxy-zoom-chat-send:disabled { opacity: .55 }
     #galaxy-zoom-chat-error { padding: 0 16px 8px; color: #fca5a5; font-size: 12px }
+
+    #galaxy-zoom-chat-toast[hidden],
+    #galaxy-zoom-options[hidden] { display: none !important }
+
+    html:not(.native-embedded) #galaxy-zoom-chat-toast,
+    html:not(.native-embedded) #galaxy-zoom-options { display: none !important }
+
+    #galaxy-zoom-chat-toast {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+      z-index: 2147483646;
+      display: flex;
+      width: calc(100% - 32px);
+      max-width: 360px;
+      margin: 0 auto;
+      border-radius: 14px;
+      background: #292a2d;
+      color: #f4f4f5;
+      box-shadow: 0 8px 24px rgba(0,0,0,.38);
+      overflow: hidden;
+      font: 14px Arial, sans-serif
+    }
+
+    #galaxy-zoom-chat-toast-open {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      font: inherit
+    }
+
+    #galaxy-zoom-chat-toast-sender,
+    #galaxy-zoom-chat-toast-preview {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    #galaxy-zoom-chat-toast-sender { color: #d4d4d8; font-size: 12px; font-weight: 600 }
+    #galaxy-zoom-chat-toast-preview { margin-top: 4px; color: #fff }
+
+    #galaxy-zoom-chat-toast-close {
+      flex: 0 0 40px;
+      border: 0;
+      background: transparent;
+      color: #a1a1aa;
+      font: 20px Arial, sans-serif
+    }
+
+    #galaxy-zoom-options {
+      position: fixed;
+      top: var(--galaxy-zoom-chat-top, 0px);
+      left: 0;
+      right: 0;
+      height: var(--galaxy-zoom-chat-height, 100%);
+      z-index: 2147483646;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      background: rgba(0,0,0,.58);
+      color: #f4f4f5;
+      font: 14px Arial, sans-serif;
+      box-sizing: border-box
+    }
+
+    #galaxy-zoom-options-sheet {
+      width: min(520px, 100%);
+      max-height: 88%;
+      padding: 10px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+      border-radius: 20px 20px 0 0;
+      background: #202124;
+      box-shadow: 0 -8px 32px rgba(0,0,0,.32);
+      box-sizing: border-box
+    }
+
+    #galaxy-zoom-options header {
+      display: flex;
+      align-items: center;
+      min-height: 48px;
+      gap: 12px
+    }
+
+    #galaxy-zoom-options-title { flex: 1; font-size: 16px; font-weight: 600 }
+
+    #galaxy-zoom-options-close {
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 20px;
+      background: transparent;
+      color: #f4f4f5;
+      font-size: 24px
+    }
+
+    #galaxy-zoom-options-description {
+      margin: 6px 0 16px;
+      color: #c4c4c8;
+      line-height: 1.45
+    }
+
+    .galaxy-zoom-option-button {
+      width: 100%;
+      min-height: 48px;
+      margin-top: 8px;
+      padding: 0 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px;
+      background: #2b2c30;
+      color: #f4f4f5;
+      text-align: left;
+      font: inherit
+    }
 
     button[aria-label*="invite" i],
     button[title*="invite" i],
@@ -301,6 +435,7 @@
       <button id="galaxy-zoom-chat-close" type="button" aria-label="Close chat">×</button>
       <div id="galaxy-zoom-chat-heading">Meeting Chat</div>
       <div id="galaxy-zoom-chat-recipient">To Everyone</div>
+      <button id="galaxy-zoom-chat-notifications" type="button" aria-label="Mute chat notifications" aria-pressed="false" title="Mute chat notifications">🔔</button>
     </header>
     <div id="galaxy-zoom-chat-messages" role="log" aria-live="polite"></div>
     <div id="galaxy-zoom-chat-error" hidden></div>
@@ -308,6 +443,23 @@
       <input id="galaxy-zoom-chat-input" type="text" maxlength="1000" autocomplete="off" placeholder="Message everyone" aria-label="Message everyone">
       <button id="galaxy-zoom-chat-send" type="submit">Send</button>
     </form>
+  </section>
+  <div id="galaxy-zoom-chat-toast" hidden role="status" aria-live="polite">
+    <button id="galaxy-zoom-chat-toast-open" type="button" aria-label="Open meeting chat">
+      <span id="galaxy-zoom-chat-toast-sender"></span>
+      <span id="galaxy-zoom-chat-toast-preview"></span>
+    </button>
+    <button id="galaxy-zoom-chat-toast-close" type="button" aria-label="Dismiss message alert">×</button>
+  </div>
+  <section id="galaxy-zoom-options" hidden aria-hidden="true" aria-label="Meeting options">
+    <div id="galaxy-zoom-options-sheet" role="dialog" aria-modal="true" aria-labelledby="galaxy-zoom-options-title">
+      <header>
+        <div id="galaxy-zoom-options-title">More options</div>
+        <button id="galaxy-zoom-options-close" type="button" aria-label="Close options">×</button>
+      </header>
+      <p id="galaxy-zoom-options-description"></p>
+      <button id="galaxy-zoom-options-chat" class="galaxy-zoom-option-button" type="button">Open meeting chat</button>
+    </div>
   </section>
   <div id="aria-notify-area"></div>
   <script>
@@ -407,7 +559,102 @@
         var zoomChatInput = document.getElementById('galaxy-zoom-chat-input');
         var zoomChatSend = document.getElementById('galaxy-zoom-chat-send');
         var zoomChatError = document.getElementById('galaxy-zoom-chat-error');
-        var bypassZoomChatClick = false;
+        var zoomChatToast = document.getElementById('galaxy-zoom-chat-toast');
+        var zoomChatToastSender = document.getElementById('galaxy-zoom-chat-toast-sender');
+        var zoomChatToastPreview = document.getElementById('galaxy-zoom-chat-toast-preview');
+        var zoomOptionsPanel = document.getElementById('galaxy-zoom-options');
+        var zoomOptionsTitle = document.getElementById('galaxy-zoom-options-title');
+        var zoomOptionsDescription = document.getElementById('galaxy-zoom-options-description');
+        var zoomChatToastTimer = null;
+        var zoomChatNotificationsMuted = false;
+
+        function syncZoomVisibleViewport() {
+          var viewport = window.visualViewport;
+          var top = viewport ? viewport.offsetTop : 0;
+          var height = viewport ? viewport.height : window.innerHeight;
+          document.documentElement.style.setProperty('--galaxy-zoom-chat-top', Math.max(0, top) + 'px');
+          document.documentElement.style.setProperty('--galaxy-zoom-chat-height', Math.max(1, height) + 'px');
+        }
+
+        syncZoomVisibleViewport();
+        window.addEventListener('resize', syncZoomVisibleViewport);
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', syncZoomVisibleViewport);
+          window.visualViewport.addEventListener('scroll', syncZoomVisibleViewport);
+        }
+
+        function hideZoomChatToast() {
+          if (zoomChatToastTimer) window.clearTimeout(zoomChatToastTimer);
+          zoomChatToastTimer = null;
+          if (zoomChatToast) zoomChatToast.hidden = true;
+        }
+
+        function showZoomChatToast(chatMessage) {
+          if (zoomChatNotificationsMuted || !zoomChatToast || !chatMessage || !zoomChatPanel.hidden || !zoomOptionsPanel.hidden) return;
+          zoomChatToastSender.textContent = 'From ' + chatMessage.sender +
+            (chatMessage.receiver ? ' · to ' + chatMessage.receiver : '');
+          zoomChatToastPreview.textContent = chatMessage.text;
+          zoomChatToast.hidden = false;
+          if (zoomChatToastTimer) window.clearTimeout(zoomChatToastTimer);
+          zoomChatToastTimer = window.setTimeout(hideZoomChatToast, 6500);
+        }
+
+        function findNativeZoomChatToast(start) {
+          var zoomRoot = document.getElementById('zmmtg-root');
+          var element = start && start.nodeType === 1 ? start : start && start.parentElement;
+          var depth = 0;
+          while (element && element !== document.body && element !== zoomRoot && depth < 10) {
+            if (!element.closest('#galaxy-zoom-chat-toast') && !element.closest('#galaxy-zoom-chat') &&
+              !element.closest('#galaxy-zoom-options')) {
+              var text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
+              var rect = element.getBoundingClientRect();
+              if (text.length > 0 && text.length < 500 && /\bfrom\s+.{1,140}\s+to\s+.{1,100}\b/i.test(text) &&
+                rect.width >= 120 && rect.width <= window.innerWidth + 16 && rect.height >= 24 && rect.height <= 180) {
+                return element;
+              }
+            }
+            element = element.parentElement;
+            depth++;
+          }
+          return null;
+        }
+
+        function hideNativeZoomChatToast(element) {
+          if (!element || element.getAttribute('data-galaxy-chat-toast-hidden') === 'true') return;
+          element.setAttribute('data-galaxy-chat-toast-hidden', 'true');
+          element.setAttribute('aria-hidden', 'true');
+          element.style.setProperty('display', 'none', 'important');
+        }
+
+        function suppressNativeZoomChatToasts() {
+          var zoomRoot = document.getElementById('zmmtg-root');
+          if (!zoomRoot || !window.MutationObserver) return;
+          var observer = new MutationObserver(function (changes) {
+            changes.forEach(function (change) {
+              var nodes = [];
+              if (change.target && change.target.nodeType === 1) nodes.push(change.target);
+              if (change.addedNodes) {
+                Array.prototype.forEach.call(change.addedNodes, function (node) {
+                  if (node.nodeType === 1) nodes.push(node);
+                });
+              }
+              nodes.forEach(function (node) {
+                var candidates = [node];
+                if (node.querySelectorAll) {
+                  Array.prototype.slice.call(node.querySelectorAll('*'), 0, 160).forEach(function (child) {
+                    candidates.push(child);
+                  });
+                }
+                candidates.forEach(function (candidate) {
+                  hideNativeZoomChatToast(findNativeZoomChatToast(candidate));
+                });
+              });
+            });
+          });
+          observer.observe(zoomRoot, { childList: true, subtree: true, characterData: true });
+        }
+
+        suppressNativeZoomChatToasts();
 
         function zoomChatName(value) {
           if (typeof value === 'string') return value;
@@ -512,6 +759,7 @@
           zoomChatMessages.push(message);
           if (zoomChatMessages.length > 200) zoomChatMessages.shift();
           renderZoomChatMessages();
+          if (!message.mine) showZoomChatToast(message);
         }
 
         function receiveZoomChatMessage(data) {
@@ -525,24 +773,87 @@
 
         function setZoomChatPanelOpen(open) {
           if (!zoomChatPanel) return;
+          if (open) {
+            hideZoomChatToast();
+            setZoomOptionsPanelOpen(false);
+          } else if (zoomChatInput && document.activeElement === zoomChatInput) {
+            zoomChatInput.blur();
+          }
           zoomChatPanel.hidden = !open;
           zoomChatPanel.setAttribute('aria-hidden', String(!open));
           if (open) {
             if (zoomChatError) zoomChatError.hidden = true;
             renderZoomChatMessages();
-            window.setTimeout(function () { if (zoomChatInput) zoomChatInput.focus(); }, 100);
+            syncZoomVisibleViewport();
+            window.requestAnimationFrame(syncZoomVisibleViewport);
+          }
+        }
+
+        function setZoomOptionsPanelOpen(open, mode) {
+          if (!zoomOptionsPanel) return;
+          if (open) {
+            hideZoomChatToast();
+            if (zoomChatInput && document.activeElement === zoomChatInput) zoomChatInput.blur();
+            zoomChatPanel.hidden = true;
+            zoomChatPanel.setAttribute('aria-hidden', 'true');
+            var audioMode = mode === 'audio';
+            zoomOptionsTitle.textContent = audioMode ? 'Audio options' : 'More options';
+            zoomOptionsDescription.textContent = audioMode
+              ? (joinWithAudio
+                ? 'Speaker audio is connected. Use your Android volume buttons to adjust the listening volume.'
+                : 'Audio is disconnected. Rejoin with audio from the meeting controls to listen.')
+              : (isStudent
+                ? 'Camera, microphone, screen sharing, and host controls are disabled for student attendees.'
+                : 'Open meeting chat or use the Zoom meeting controls for the available host options.');
+          }
+          zoomOptionsPanel.hidden = !open;
+          zoomOptionsPanel.setAttribute('aria-hidden', String(!open));
+          if (open) {
+            syncZoomVisibleViewport();
+            window.requestAnimationFrame(syncZoomVisibleViewport);
           }
         }
 
         if (document.documentElement.classList.contains('native-embedded')) {
           document.getElementById('galaxy-zoom-chat-close').addEventListener('click', function () {
-            var zoomChatControl = findZoomControl('chat');
-            if (zoomChatControl && /\bclose\b/i.test(zoomChatControl.label)) {
-              bypassZoomChatClick = true;
-              zoomChatControl.element.click();
-              bypassZoomChatClick = false;
-            }
             setZoomChatPanelOpen(false);
+          });
+
+          document.getElementById('galaxy-zoom-chat-notifications').addEventListener('click', function (event) {
+            event.preventDefault();
+            zoomChatNotificationsMuted = !zoomChatNotificationsMuted;
+            var button = event.currentTarget;
+            button.setAttribute('aria-pressed', String(zoomChatNotificationsMuted));
+            button.setAttribute('aria-label', zoomChatNotificationsMuted ? 'Unmute chat notifications' : 'Mute chat notifications');
+            button.title = zoomChatNotificationsMuted ? 'Unmute chat notifications' : 'Mute chat notifications';
+            button.textContent = zoomChatNotificationsMuted ? '🔕' : '🔔';
+            if (zoomChatNotificationsMuted) hideZoomChatToast();
+          });
+
+          document.getElementById('galaxy-zoom-chat-toast-open').addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            hideZoomChatToast();
+            setZoomChatPanelOpen(true);
+          });
+
+          document.getElementById('galaxy-zoom-chat-toast-close').addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            hideZoomChatToast();
+          });
+
+          document.getElementById('galaxy-zoom-options-close').addEventListener('click', function () {
+            setZoomOptionsPanelOpen(false);
+          });
+
+          zoomOptionsPanel.addEventListener('click', function (event) {
+            if (event.target === zoomOptionsPanel) setZoomOptionsPanelOpen(false);
+          });
+
+          document.getElementById('galaxy-zoom-options-chat').addEventListener('click', function () {
+            setZoomOptionsPanelOpen(false);
+            setZoomChatPanelOpen(true);
           });
 
           document.getElementById('galaxy-zoom-chat-form').addEventListener('submit', function (event) {
@@ -589,77 +900,90 @@
             }
           });
 
+          function closeZoomPopupContaining(element) {
+            var zoomRoot = document.getElementById('zmmtg-root');
+            var current = element;
+            var fallback = null;
+            var depth = 0;
+            while (current && current !== zoomRoot && current !== document.body && depth < 10) {
+              var identity = String(current.id || '') + ' ' + String(current.className || '');
+              if (/zm-popup__visible/i.test(identity)) {
+                current.style.setProperty('display', 'none', 'important');
+                return;
+              }
+              if (/popup|dropdown|popover|menu/i.test(identity)) fallback = current;
+              current = current.parentElement;
+              depth++;
+            }
+            if (fallback) fallback.style.setProperty('display', 'none', 'important');
+          }
+
           document.addEventListener('click', function (event) {
-            if (bypassZoomChatClick) return;
             var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
-            if (target && target.closest('#galaxy-zoom-chat')) return;
-            var control = target && target.closest('button,[role="button"],[aria-label],[title]');
+            if (!target || target.closest('#galaxy-zoom-chat') || target.closest('#galaxy-zoom-chat-toast') ||
+              target.closest('#galaxy-zoom-options')) return;
+
+            var nativeToast = findNativeZoomChatToast(target);
+            if (nativeToast) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              hideNativeZoomChatToast(nativeToast);
+              setZoomChatPanelOpen(true);
+              return;
+            }
+
+            var control = target.closest('button,[role="button"],[role="menuitem"],[aria-label],[title],a');
             if (!control) return;
             var label = [control.getAttribute('aria-label'), control.getAttribute('title'), control.innerText, control.textContent]
               .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-            if (!/\bchat\b/i.test(label)) return;
-            var closing = /\bclose\b/i.test(label);
-            window.setTimeout(function () { setZoomChatPanelOpen(!closing); }, 80);
+
+            if (/\baudio\s+options?\b/i.test(label)) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              closeZoomPopupContaining(target);
+              setZoomOptionsPanelOpen(true, 'audio');
+              return;
+            }
+
+            if (/\bmore\b/i.test(label) && !/\b(audio|speaker|microphone|camera|video)\b/i.test(label)) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              setZoomOptionsPanelOpen(zoomOptionsPanel.hidden, 'more');
+              return;
+            }
+
+            if (/\bchat\b/i.test(label)) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              setZoomChatPanelOpen(zoomChatPanel.hidden);
+            }
           }, true);
 
           document.addEventListener('keydown', function (event) {
             if (event.key === 'Escape' && zoomChatPanel && !zoomChatPanel.hidden) {
               document.getElementById('galaxy-zoom-chat-close').click();
+            } else if (event.key === 'Escape' && zoomOptionsPanel && !zoomOptionsPanel.hidden) {
+              setZoomOptionsPanelOpen(false);
             }
           });
         }
 
-        function findZoomControl(panel) {
-          var root = document.getElementById('wc-footer') || document.getElementById('zmmtg-root') || document;
-          var controls = root.querySelectorAll('button,[role="button"]');
-          var best = null;
-          var bestScore = Infinity;
-          for (var i = 0; i < controls.length; i++) {
-            var element = controls[i];
-            if (!element || !element.getClientRects().length || element.disabled ||
-              element.getAttribute('aria-disabled') === 'true' || element.getAttribute('aria-hidden') === 'true') continue;
-            var label = [
-              element.getAttribute('aria-label'),
-              element.getAttribute('title'),
-              element.getAttribute('data-tooltip'),
-              element.innerText,
-              element.textContent,
-            ].filter(Boolean).join(' ').trim().toLowerCase().replace(/\s+/g, ' ');
-            var style = window.getComputedStyle(element);
-            if (style.display === 'none' || style.visibility === 'hidden') continue;
-            var score;
-            if (panel === 'chat') {
-              if (!/\bchat\b/i.test(label)) continue;
-              score = label === 'chat' ? 0 : (/\b(open|panel)\b/i.test(label) ? 1 : 2);
-            } else {
-              if (!/\bmore\b/i.test(label) || /\b(audio|speaker|microphone|camera|video)\b/i.test(label)) continue;
-              score = label === 'more' ? 0 : (/\bmore options\b/i.test(label) ? 1 : 2);
-            }
-            if (score < bestScore) {
-              best = { element: element, label: label };
-              bestScore = score;
-            }
+        function openGalaxyPanel(panel) {
+          if (panel === 'chat') {
+            setZoomChatPanelOpen(true);
+            markTiming('panel-open', { panel: panel, source: 'Galaxy classroom chat' });
+          } else {
+            setZoomOptionsPanelOpen(true, 'more');
+            markTiming('panel-open', { panel: panel, source: 'Galaxy classroom options' });
           }
-          return best;
-        }
-        function deliverZoomPanel(panel, attemptsLeft) {
-          var match = findZoomControl(panel);
-          if (match) {
-            match.element.click();
-            markTiming('panel-open', { panel: panel, label: match.label.slice(0, 60) });
-            return;
-          }
-          if (attemptsLeft > 0) {
-            window.setTimeout(function () { deliverZoomPanel(panel, attemptsLeft - 1); }, 200);
-            return;
-          }
-          postClassroomEvent('control-error', panel === 'chat'
-            ? 'Zoom chat is not available in this class.'
-            : 'More Zoom controls are not available yet.');
         }
 
-        // The Android shell provides 48dp controls for the Zoom panels. Trigger the matching
-        // visible SDK control so users don't have to reach the embedded footer at the screen edge.
+        // The Android shell provides reachable controls while the custom panels avoid the
+        // Zoom mobile-web popups that render as a dim backdrop without their contents.
         window.GalaxyClassroomUi = {
           openPanel: function (panel) {
             if (panel !== 'chat' && panel !== 'more') return false;
@@ -668,7 +992,7 @@
               postClassroomEvent('status', 'Zoom is finishing the connection…');
               return true;
             }
-            deliverZoomPanel(panel, 15);
+            openGalaxyPanel(panel);
             return true;
           },
         };
@@ -828,7 +1152,7 @@
                   if (pendingPanel) {
                     var requestedPanel = pendingPanel;
                     pendingPanel = null;
-                    deliverZoomPanel(requestedPanel, 15);
+                    openGalaxyPanel(requestedPanel);
                   }
                   window.removeEventListener('unhandledrejection', handleUnhandledJoinRejection);
                   status.style.display = 'none';
