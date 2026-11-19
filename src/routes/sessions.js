@@ -146,7 +146,8 @@ const validateRecurringPayload = async (req, res, payload) => {
   const courseName = typeof payload?.courseName === 'string' ? payload.courseName.trim() : 'General';
   const hostId = payload?.hostId ? toInt(payload.hostId) : null;
   const timezone = typeof payload?.timezone === 'string' ? payload.timezone.trim() : 'Asia/Karachi';
-  const zoomAccount = ['account1', 'account2'].includes(payload?.zoomAccount) ? payload.zoomAccount : 'account1';
+  const zoomAccount = typeof payload?.zoomAccount === 'string' && payload.zoomAccount.trim()
+    ? payload.zoomAccount.trim() : 'account1';
   const videoParticipantIds = req.user.role === ROLE.ADMIN
     ? normalizeParticipantIds(payload?.videoParticipantIds)
     : [];
@@ -169,8 +170,8 @@ const validateRecurringPayload = async (req, res, payload) => {
     const [section] = await sql`SELECT 1 FROM sections WHERE id = ${sectionId} AND class_id = ${classId}`;
     if (!section) { fail(res, 400, 'Section does not belong to that class.'); return null; }
   }
-  if (!zoomAccountConfigured(zoomAccount)) {
-    fail(res, 503, `Configure ${zoomAccount === 'account2' ? 'Zoom account 2' : 'Zoom account 1'} before using this schedule.`);
+  if (!(await zoomAccountConfigured(zoomAccount))) {
+    fail(res, 503, 'Choose an active, validated Zoom account before using this schedule.');
     return null;
   }
   if (!(await validateVideoParticipants(videoParticipantIds))) {
@@ -316,9 +317,10 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
   const end = planEnd ? new Date(planEnd) : new Date(start.getTime() + 90 * 60000);
   if (isNaN(start) || isNaN(end) || end <= start) return fail(res, 400, 'End time must be after start time');
 
-  const zoomAccount = ['account1', 'account2'].includes(req.body?.zoomAccount) ? req.body.zoomAccount : 'account1';
-  if (videoEnabled && !zoomAccountConfigured(zoomAccount)) {
-    return fail(res, 503, `Configure ${zoomAccount === 'account2' ? 'Zoom account 2' : 'Zoom account 1'} before scheduling a video class.`);
+  const zoomAccount = typeof req.body?.zoomAccount === 'string' && req.body.zoomAccount.trim()
+    ? req.body.zoomAccount.trim() : 'account1';
+  if (videoEnabled && !(await zoomAccountConfigured(zoomAccount))) {
+    return fail(res, 503, 'Choose an active, validated Zoom account before scheduling a video class.');
   }
 
   // A teacher hosts their own session; Admin/Operator may nominate a host.
@@ -352,9 +354,9 @@ sessionsRouter.post('/', requireRole(...STAFF_ROLES), asyncHandler(async (req, r
   res.status(201).json({ success: true, data: toDto(row) });
 }));
 
-sessionsRouter.get('/zoom-accounts', requireRole(...STAFF_ROLES), (_req, res) => {
-  res.json({ success: true, data: configuredZoomAccounts() });
-});
+sessionsRouter.get('/zoom-accounts', requireRole(...STAFF_ROLES), asyncHandler(async (_req, res) => {
+  res.json({ success: true, data: await configuredZoomAccounts() });
+}));
 
 sessionsRouter.get('/video-participants', requireRole(ROLE.ADMIN), asyncHandler(async (_req, res) => {
   const data = await sql`
@@ -531,12 +533,13 @@ sessionsRouter.put('/:id', requireRole(ROLE.ADMIN), asyncHandler(async (req, res
   const start = req.body?.planStart ? new Date(req.body.planStart) : new Date(old.plan_start);
   const end = req.body?.planEnd ? new Date(req.body.planEnd) : new Date(old.plan_end);
   const videoEnabled = typeof req.body?.videoEnabled === 'boolean' ? req.body.videoEnabled : old.video_enabled !== false;
-  const zoomAccount = ['account1', 'account2'].includes(req.body?.zoomAccount) ? req.body.zoomAccount : old.zoom_account || 'account1';
+  const zoomAccount = typeof req.body?.zoomAccount === 'string' && req.body.zoomAccount.trim()
+    ? req.body.zoomAccount.trim() : old.zoom_account || 'account1';
   if (!title || title.length > 180 || courseName.length > 120 || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
     return fail(res, 400, 'Provide a valid session title, subject, start time, and end time.');
   }
-  if (videoEnabled && !zoomAccountConfigured(zoomAccount)) {
-    return fail(res, 503, `Configure ${zoomAccount === 'account2' ? 'Zoom account 2' : 'Zoom account 1'} before saving this video class.`);
+  if (videoEnabled && !(await zoomAccountConfigured(zoomAccount))) {
+    return fail(res, 503, 'Choose an active, validated Zoom account before saving this video class.');
   }
 
   const participantIds = req.body?.videoParticipantIds === undefined

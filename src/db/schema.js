@@ -227,6 +227,25 @@ export const initSchema = async () => {
   `;
 
   await sql`
+    CREATE TABLE IF NOT EXISTS zoom_accounts (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      account_id TEXT NOT NULL UNIQUE,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      client_secret_encrypted TEXT NOT NULL,
+      meeting_sdk_client_id TEXT NOT NULL,
+      meeting_sdk_client_secret_encrypted TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      validated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_zoom_accounts_active_label ON zoom_accounts (LOWER(label)) WHERE is_active = TRUE`;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS recurring_live_schedules (
       id SERIAL PRIMARY KEY,
       class_id INTEGER NOT NULL REFERENCES classes(id),

@@ -488,7 +488,7 @@ const start = async () => {
       await seedDatabase();
     }
 
-    if (!zoomConfigured()) {
+    if (!(await zoomConfigured())) {
       console.warn(
         '[zoom] Zoom Meeting SDK and account credentials are missing: live classes cannot create or join Zoom meetings.'
       );

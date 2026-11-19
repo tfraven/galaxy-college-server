@@ -52,6 +52,7 @@ export const config = {
   corsOrigins,
   frontendUrl: (process.env.FRONTEND_URL || corsOrigins[0] || '').replace(/\/+$/, ''),
   zoom: {
+    credentialsEncryptionKey: process.env.ZOOM_CREDENTIALS_ENCRYPTION_KEY || jwtSecret || 'dev-only-zoom-key-change-me',
     accounts: {
       account1: {
         label: process.env.ZOOM_ACCOUNT_1_LABEL || 'Zoom account 1',

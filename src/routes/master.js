@@ -1,10 +1,55 @@
 import express from 'express';
 import { sql } from '../db/connection.js';
-import { asyncHandler } from '../middleware/auth.js';
+import { asyncHandler, requireRole, ROLE } from '../middleware/auth.js';
 import { getPagination, paginationMeta } from '../middleware/pagination.js';
+import {
+  createManagedZoomAccount, listZoomAccountsForAdmin, setManagedZoomAccountActive,
+  validateZoomAccountCredentials,
+} from '../services/zoom.js';
 
 // Read-only reference data. Mounted behind authenticate.
 export const masterRouter = express.Router();
+
+const sendZoomAccountError = (res, error) => {
+  const status = Number.isInteger(error?.status) ? error.status : error?.code === '23505' ? 409 : 502;
+  const message = error?.code === '23505' ? 'This Zoom account or active label is already configured.'
+    : error?.message || 'Could not complete the Zoom account operation.';
+  return res.status(status).json({ success: false, error: message });
+};
+
+masterRouter.get('/zoom-accounts', requireRole(ROLE.ADMIN), asyncHandler(async (_req, res) => {
+  res.json({ success: true, data: await listZoomAccountsForAdmin() });
+}));
+
+masterRouter.post('/zoom-accounts/test', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  try {
+    const result = await validateZoomAccountCredentials(req.body || {});
+    res.json({ success: true, data: { validated: true, checks: result.checks } });
+  } catch (error) {
+    sendZoomAccountError(res, error);
+  }
+}));
+
+masterRouter.post('/zoom-accounts', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  try {
+    const account = await createManagedZoomAccount(req.body || {}, req.user.id);
+    res.status(201).json({ success: true, data: account });
+  } catch (error) {
+    sendZoomAccountError(res, error);
+  }
+}));
+
+masterRouter.patch('/zoom-accounts/:id/active', requireRole(ROLE.ADMIN), asyncHandler(async (req, res) => {
+  if (typeof req.body?.isActive !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'isActive must be true or false.' });
+  }
+  try {
+    const account = await setManagedZoomAccountActive(req.params.id, req.body.isActive);
+    res.json({ success: true, data: account });
+  } catch (error) {
+    sendZoomAccountError(res, error);
+  }
+}));
 
 const positiveInt = (value) => {
   const parsed = Number(value);
