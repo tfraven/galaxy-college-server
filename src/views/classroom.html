@@ -273,6 +273,63 @@
 
         var meetingJoined = false;
         var pendingPanel = null;
+        // Capture Zoom's mobile panel geometry in the Android WebView. This is deliberately
+        // limited to Chat/More clicks and never reads panel contents or chat messages.
+        if (document.documentElement.classList.contains('native-embedded')) {
+          function panelElementMetrics(element) {
+            if (!element) return null;
+            var rect = element.getBoundingClientRect();
+            var style = window.getComputedStyle(element);
+            return {
+              id: element.id || '',
+              className: typeof element.className === 'string' ? element.className.slice(0, 120) : '',
+              rect: [rect.left, rect.top, rect.width, rect.height].map(function (value) { return Math.round(value); }),
+              display: style.display,
+              visibility: style.visibility,
+              opacity: style.opacity,
+              position: style.position,
+              transform: style.transform,
+              zIndex: style.zIndex,
+              overflow: style.overflow,
+            };
+          }
+          function logZoomPanelGeometry(label, phase) {
+            var chatWindow = document.getElementById('chat-window');
+            var visiblePopups = Array.prototype.slice.call(document.querySelectorAll('.zm-popup__visible'), 0, 3);
+            var innerWrapper = document.querySelector('.zm-popup__visible .zm-popup__inner-wrapper');
+            var ancestors = [];
+            for (var node = chatWindow, depth = 0; node && depth < 5; node = node.parentElement, depth++) {
+              ancestors.push(panelElementMetrics(node));
+            }
+            var visual = window.visualViewport;
+            console.info('[chat-panel-debug] ' + JSON.stringify({
+              control: label,
+              phase: phase,
+              viewport: {
+                width: window.innerWidth,
+                height: window.innerHeight,
+                visualWidth: visual ? Math.round(visual.width) : null,
+                visualHeight: visual ? Math.round(visual.height) : null,
+                scale: visual ? visual.scale : null,
+              },
+              chatWindow: panelElementMetrics(chatWindow),
+              popupInner: panelElementMetrics(innerWrapper),
+              visiblePopups: visiblePopups.map(panelElementMetrics),
+              chatAncestors: ancestors,
+            }));
+          }
+          document.addEventListener('click', function (event) {
+            var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
+            var control = target && target.closest('button,[role="button"],[aria-label],[title]');
+            if (!control) return;
+            var label = [control.getAttribute('aria-label'), control.getAttribute('title'), control.innerText, control.textContent]
+              .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+            if (!/\b(chat|more)\b/i.test(label)) return;
+            [0, 180, 650, 1200].forEach(function (delay) {
+              window.setTimeout(function () { logZoomPanelGeometry(label, delay + 'ms'); }, delay);
+            });
+          }, true);
+        }
         function findZoomControl(panel) {
           var root = document.getElementById('wc-footer') || document.getElementById('zmmtg-root') || document;
           var controls = root.querySelectorAll('button,[role="button"]');
