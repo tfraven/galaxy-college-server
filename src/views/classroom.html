@@ -306,6 +306,42 @@
               overflow: style.overflow,
             };
           }
+          function chatContentMetrics(root) {
+            if (!root) return [];
+            var result = [];
+            var pending = [{ element: root, depth: 0 }];
+            while (pending.length && result.length < 32) {
+              var item = pending.shift();
+              var element = item.element;
+              var rect = element.getBoundingClientRect();
+              var style = window.getComputedStyle(element);
+              result.push({
+                depth: item.depth,
+                tag: element.tagName.toLowerCase(),
+                id: element.id || '',
+                className: typeof element.className === 'string' ? element.className.slice(0, 90) : '',
+                rect: [rect.left, rect.top, rect.width, rect.height].map(function (value) { return Math.round(value); }),
+                display: style.display,
+                visibility: style.visibility,
+                opacity: style.opacity,
+                position: style.position,
+                overflowY: style.overflowY,
+                flex: style.flex,
+                color: style.color,
+                backgroundColor: style.backgroundColor,
+                clientHeight: element.clientHeight,
+                scrollHeight: element.scrollHeight,
+                childCount: element.children.length,
+                textLength: (element.textContent || '').length,
+              });
+              if (item.depth < 5) {
+                for (var childIndex = 0; childIndex < element.children.length; childIndex++) {
+                  pending.push({ element: element.children[childIndex], depth: item.depth + 1 });
+                }
+              }
+            }
+            return result;
+          }
           function logZoomPanelGeometry(label, phase) {
             var chatWindow = document.getElementById('chat-window');
             var visiblePopups = Array.prototype.slice.call(document.querySelectorAll('.zm-popup__visible'), 0, 3);
@@ -330,6 +366,15 @@
               visiblePopups: visiblePopups.map(panelElementMetrics),
               chatAncestors: ancestors,
             }));
+            if (phase === '1200ms') {
+              var contentNodes = chatContentMetrics(chatWindow);
+              for (var index = 0; index < contentNodes.length; index += 8) {
+                console.info('[chat-content-debug] ' + JSON.stringify({
+                  control: label,
+                  nodes: contentNodes.slice(index, index + 8),
+                }));
+              }
+            }
           }
           document.addEventListener('click', function (event) {
             var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
