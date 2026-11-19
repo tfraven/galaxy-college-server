@@ -237,6 +237,17 @@
     html:not(.native-embedded) #galaxy-zoom-chat-toast,
     html:not(.native-embedded) #galaxy-zoom-options { display: none !important }
 
+    /* The Android app already has a native meeting title bar. Keep Zoom's
+       duplicate meeting details and view switcher out of its embedded UI. */
+    html.native-embedded #meeting-info-indication,
+    html.native-embedded #meeting-info-encryption-indication,
+    html.native-embedded #zmmtg-root [aria-label="Meeting information"],
+    html.native-embedded #zmmtg-root [title="Meeting information"],
+    html.native-embedded #zmmtg-root [aria-label="Encryption information"],
+    html.native-embedded #zmmtg-root [title="Encryption information"],
+    html.native-embedded #zmmtg-root [aria-label="View"],
+    html.native-embedded #zmmtg-root [title="View"] { display: none !important }
+
     #galaxy-zoom-chat-toast {
       position: fixed;
       left: 16px;
@@ -1079,7 +1090,7 @@
           disableReport: isStudent,
           disablePreview: true,
           disableJoinAudio: !joinWithAudio,
-          showMeetingHeader: true,
+          showMeetingHeader: false,
           meetingInfo: isStudent ? ['topic', 'host'] : ['topic', 'host', 'participant'],
           isSupportAV: true,
           isSupportChat: true,
@@ -1158,25 +1169,6 @@
                   document.getElementById('zmmtg-root').style.display = 'block';
                   window.ZoomMtg.showInviteFunction({ show: false });
                   window.ZoomMtg.showRecordFunction({ show: false });
-
-                  // Auto-join speaker audio if requested
-                  if (joinWithAudio) {
-                    var audioAttempts = 0;
-                    var audioInterval = setInterval(function () {
-                      audioAttempts++;
-                      var buttons = document.querySelectorAll('button, [role="button"]');
-                      for (var i = 0; i < buttons.length; i++) {
-                        var btn = buttons[i];
-                        var text = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '')).toLowerCase();
-                        if (text.includes('computer audio') || text.includes('join audio') || text.includes('join with computer audio')) {
-                          btn.click();
-                          clearInterval(audioInterval);
-                          return;
-                        }
-                      }
-                      if (audioAttempts > 20) clearInterval(audioInterval);
-                    }, 400);
-                  }
 
                   var controlSelector = 'button,[role="button"],a';
                   var blockedControlPatterns = [
