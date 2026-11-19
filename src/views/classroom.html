@@ -383,13 +383,25 @@
         window.history.replaceState(null, '', window.location.pathname);
         window.ZoomMtg.setZoomJSLib('https://source.zoom.us/6.10.0/lib', '/av');
         try {
-          console.info('[classroom] env', {
+          var featureRequirements = window.ZoomMtg.checkFeatureRequirements
+            ? window.ZoomMtg.checkFeatureRequirements()
+            : null;
+          var visualViewport = window.visualViewport;
+          console.info('[classroom] env ' + JSON.stringify({
             crossOriginIsolated: window.crossOriginIsolated === true,
             sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
             webCodecs: typeof VideoDecoder !== 'undefined',
             offscreenCanvas: typeof OffscreenCanvas !== 'undefined',
-            requirements: window.ZoomMtg.checkFeatureRequirements && window.ZoomMtg.checkFeatureRequirements(),
-          });
+            userAgent: navigator.userAgent,
+            viewport: {
+              width: window.innerWidth,
+              height: window.innerHeight,
+              visualWidth: visualViewport ? visualViewport.width : null,
+              visualHeight: visualViewport ? visualViewport.height : null,
+              visualScale: visualViewport ? visualViewport.scale : null,
+            },
+            requirements: featureRequirements,
+          }));
         } catch (e) { }
         var wasmStartedAt = performance.now();
         window.ZoomMtg.preLoadWasm();
