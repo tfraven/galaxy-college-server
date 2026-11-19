@@ -606,7 +606,7 @@
           while (element && element !== document.body && element !== zoomRoot && depth < 10) {
             if (!element.closest('#galaxy-zoom-chat-toast') && !element.closest('#galaxy-zoom-chat') &&
               !element.closest('#galaxy-zoom-options')) {
-              var text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
+              var text = (element.textContent || '').replace(/\s+/g, ' ').trim();
               var rect = element.getBoundingClientRect();
               if (text.length > 0 && text.length < 500 && /\bfrom\s+.{1,140}\s+to\s+.{1,100}\b/i.test(text) &&
                 rect.width >= 120 && rect.width <= window.innerWidth + 16 && rect.height >= 24 && rect.height <= 180) {
@@ -641,7 +641,7 @@
               nodes.forEach(function (node) {
                 var candidates = [node];
                 if (node.querySelectorAll) {
-                  Array.prototype.slice.call(node.querySelectorAll('*'), 0, 160).forEach(function (child) {
+                  Array.prototype.slice.call(node.querySelectorAll('*'), 0, 80).forEach(function (child) {
                     candidates.push(child);
                   });
                 }
