@@ -100,11 +100,10 @@
       border: 0 !important
     }
 
-    /* Keep the Zoom root viewport-sized without creating a fixed-position stacking context. Zoom
-       renders some chat UI in a portal; isolating this root can leave the portal backdrop above its
-       chat panel in Android WebView, so tapping Chat dims the meeting while hiding the panel. */
+    /* Keep Zoom's panels from being clipped by the meeting root. The document itself remains
+       viewport-clipped above, so panels can extend within the screen without creating page scroll. */
     #zmmtg-root {
-      position: absolute;
+      position: fixed;
       top: 0;
       left: 0;
       right: 0;
@@ -112,7 +111,7 @@
       width: 100%;
       height: 100%;
       min-height: 0;
-      overflow: hidden
+      overflow: visible !important
     }
 
     button[aria-label*="invite" i],
