@@ -100,6 +100,19 @@
       border: 0 !important
     }
 
+    /* Zoom's Android WebView chat bottom sheet can leave its flex content at 0px tall. */
+    html.native-embedded .zm-popup__visible .zm-popup__lock-wrapper--position-bottom:has(#chat-window) > .zm-popup__inner-wrapper {
+      height: 100% !important;
+      min-height: 100% !important
+    }
+
+    html.native-embedded .zm-popup__visible .zm-popup__lock-wrapper--position-bottom:has(#chat-window) > .zm-popup__inner-wrapper > *:has(#chat-window),
+    html.native-embedded .zm-popup__visible #chat-window {
+      height: 100% !important;
+      min-height: 0 !important;
+      flex: 1 1 auto !important
+    }
+
     button[aria-label*="invite" i],
     button[title*="invite" i],
     [role="button"][aria-label*="invite" i],
