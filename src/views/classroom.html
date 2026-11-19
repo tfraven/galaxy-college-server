@@ -100,19 +100,6 @@
       border: 0 !important
     }
 
-    /* Zoom's Android WebView chat bottom sheet can leave its flex content at 0px tall. */
-    html.native-embedded .zm-popup__visible .zm-popup__lock-wrapper--position-bottom:has(#chat-window) > .zm-popup__inner-wrapper {
-      height: 100% !important;
-      min-height: 100% !important
-    }
-
-    html.native-embedded .zm-popup__visible .zm-popup__lock-wrapper--position-bottom:has(#chat-window) > .zm-popup__inner-wrapper > *:has(#chat-window),
-    html.native-embedded .zm-popup__visible #chat-window {
-      height: 100% !important;
-      min-height: 0 !important;
-      flex: 1 1 auto !important
-    }
-
     #galaxy-zoom-chat[hidden] { display: none !important }
 
     #galaxy-zoom-chat {
@@ -449,7 +436,7 @@
           }
           addSource(data);
           if (data && typeof data === 'object') {
-            ['chatMessage', 'messageInfo', 'messageData', 'msg', 'data', 'result'].forEach(function (key) {
+            ['chatMsg', 'chatMessage', 'messageInfo', 'messageData', 'msg', 'data', 'result'].forEach(function (key) {
               addSource(data[key]);
             });
           }
@@ -464,10 +451,12 @@
           }
           var text = zoomChatText(valueFor(['message', 'content', 'msgContent', 'text', 'chatMessage']), 0);
           if (!text) return null;
-          var sender = zoomChatName(valueFor(['sender', 'senderName', 'displayName', 'userName', 'fromName'])) || 'Participant';
-          var receiverValue = valueFor(['receiver', 'receiverName', 'toName']);
-          var receiver = zoomChatName(receiverValue) || (Number(valueFor(['receiverId', 'userId'])) === 0 ? 'Everyone' : '');
-          var rawTime = valueFor(['timestamp', 'time', 'sendTime', 'date']);
+          var sender = zoomChatName(valueFor(['sender', 'senderName', 'senderDisplayName', 'displayName', 'userName', 'fromName'])) || 'Participant';
+          var receiverValue = valueFor(['receiver', 'receiverName', 'receiverDisplayName', 'toName']);
+          var isChatToAll = valueFor(['isChatToAll', 'isChatToEveryone']);
+          var receiverId = valueFor(['receiverId', 'receiverUserId']);
+          var receiver = zoomChatName(receiverValue) || (isChatToAll === true || Number(receiverId) === 0 ? 'Everyone' : '');
+          var rawTime = valueFor(['timestamp', 'timeStamp', 'time', 'sendTime', 'date']);
           var timestamp = rawTime ? Number(rawTime) : NaN;
           if (Number.isFinite(timestamp)) {
             if (timestamp < 1000000000000) timestamp *= 1000;
@@ -526,6 +515,10 @@
         }
 
         function receiveZoomChatMessage(data) {
+          if (Array.isArray(data)) {
+            data.forEach(receiveZoomChatMessage);
+            return;
+          }
           var message = normalizeZoomChatMessage(data);
           if (message) addZoomChatMessage(message);
         }
@@ -589,7 +582,7 @@
               zoomChatSend.disabled = false;
             }
             try {
-              var pendingSend = window.ZoomMtg.sendChat({ message: text, userId: 0, success: sendSucceeded, error: sendFailed });
+              var pendingSend = window.ZoomMtg.sendChat({ message: text, success: sendSucceeded, error: sendFailed });
               if (pendingSend && typeof pendingSend.then === 'function') pendingSend.then(sendSucceeded, sendFailed);
             } catch (error) {
               sendFailed(error);
