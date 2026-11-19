@@ -405,7 +405,7 @@
       }
     }
 
-    /* Student toolbar actions are reduced to audio, chat, participants, and leave. */
+    /* Keep student video/share controls hidden in the app; the website toolbar is separately allowlisted. */
     html.student-mode #zmmtg-root button[aria-label*="video" i]:not([aria-label*="view" i]),
     html.student-mode #zmmtg-root button[title*="video" i]:not([title*="view" i]),
     html.student-mode #zmmtg-root button[data-tooltip*="video" i]:not([data-tooltip*="view" i]),
@@ -415,9 +415,6 @@
     html.student-mode #zmmtg-root button[aria-label*="camera" i]:not([aria-label*="join" i]):not([aria-label*="view" i]),
     html.student-mode #zmmtg-root button[aria-label*="share screen" i],
     html.student-mode #zmmtg-root button[title*="share screen" i],
-    html.student-mode #zmmtg-root button[aria-label*="share" i],
-    html.student-mode #zmmtg-root button[title*="share" i],
-    html.student-mode #zmmtg-root button[data-tooltip*="share" i],
     html.student-mode #zmmtg-root button[aria-label*="record" i],
     html.student-mode #zmmtg-root button[title*="record" i],
     html.student-mode #zmmtg-root button[aria-label*="reaction" i],
@@ -429,13 +426,7 @@
     html.student-mode #zmmtg-root button[aria-label*="caption" i],
     html.student-mode #zmmtg-root button[title*="caption" i],
     html.student-mode #zmmtg-root button[aria-label*="whiteboard" i],
-    html.student-mode #zmmtg-root [role="button"][aria-label*="share" i],
-    html.student-mode #zmmtg-root [role="button"][title*="share" i],
-    html.student-mode #zmmtg-root [role="button"][data-tooltip*="share" i],
-    html.student-mode #zmmtg-root button[title*="whiteboard" i],
-    html.student-mode #zmmtg-root button[data-tooltip*="whiteboard" i],
-    html.student-mode #zmmtg-root [role="button"][title*="whiteboard" i],
-    html.student-mode #zmmtg-root [role="button"][data-tooltip*="whiteboard" i] {
+    html.student-mode #zmmtg-root button[title*="whiteboard" i] {
       display: none !important
     }
   </style>
@@ -523,6 +514,7 @@
         var isHost = values.get('h') === '1';
         var requestedMode = values.get('r');
         var isStudent = !isHost && requestedMode !== 'participant';
+        var restrictStudentToolbar = isStudent && !document.documentElement.classList.contains('native-embedded');
         var joinWithAudio = values.get('a') !== '0';
 
         if (isStudent) {
@@ -1141,7 +1133,7 @@
                           control.getAttribute('data-tooltip'),
                           control.getAttribute('href')
                         ].filter(Boolean).join(' ').trim();
-                        var isStudentToolbarControl = isStudent && control.closest && control.closest('#wc-footer');
+                        var isStudentToolbarControl = restrictStudentToolbar && control.closest && control.closest('#wc-footer');
                         if (isStudentToolbarControl && !studentControlAllowlist.test(label)) {
                           control.style.setProperty('display', 'none', 'important');
                           return;
